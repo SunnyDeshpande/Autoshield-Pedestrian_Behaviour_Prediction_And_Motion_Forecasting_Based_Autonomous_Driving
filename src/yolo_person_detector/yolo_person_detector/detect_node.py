@@ -1030,7 +1030,7 @@ class YoloV11PersonDetector(Node):
                     label = f"person {score:.2f}, {'CROSSING' if crossing else 'CAUTION'}"
 =======
 
-                        if in_left_fan or in_right_fan:
+                        if (in_left_fan or in_right_fan) and abs(vy/(vx+0.001)) < 0.5:
                             crossing = True
                             color = (0, 0, 255)       # red
                         else:
@@ -1079,6 +1079,7 @@ class YoloV11PersonDetector(Node):
                     )
 
                     info_text = (
+                        f"vel_x/vel_y ratio={abs(vy/(vx+0.001)):.1f},"
                         f"img_x_vel={vx:.1f}, img_y_vel={vy:.1f}, "
                         f"img_x_accel={ax:.1f}, img_y_accel={ay:.1f}"
                     )

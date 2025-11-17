@@ -55,6 +55,9 @@ class GNSSImage(Node):
 
         self.lat_start_bt = 40.092722  # 40.09269  
         self.lon_start_l  = -88.236365 # -88.23628
+        self.origin_lat = 40.0927422
+        self.origin_lon = -88.2359639
+
         self.lat_scale    = 0.00057    # 0.00062  
         self.lon_scale    = 0.00136    # 0.00136   
 
@@ -100,7 +103,7 @@ class GNSSImage(Node):
         self.next_waypoint = msg.pose.position
 
     def enu_to_geodetic(self, x, y, z=0.0):
-        lat, lon, alt = pm.enu2geodetic(x, y, z, self.lat_start_bt, self.lon_start_l, 0.0)
+        lat, lon, alt = pm.enu2geodetic(x, y, z, self.origin_lat, self.origin_lon, 0.0)
         return lat, lon, alt
 
     def timer_callback(self):    

@@ -33,12 +33,17 @@ if save_gps_csv:
 import pandas as pd
 import folium
 
-# current_pos_enu = (10.03, 5.49)
-# target_pos_enu = (10.76, 0.51)
-# current_pos_enu = (9.88, 5.09)
-# target_pos_enu = (11.81, 0.41)
-current_pos_enu = (9.50, 4.13)
-target_pos_enu = (12.88, 0.35)
+# (19.61, -0.07), Target: (24.71, 0.07)
+current_pos_enu = (19.61, -0.07)
+target_pos_enu = (24.71, 0.07)
+# (-0.32, 11.87), Target: (2.90, 7.90)
+# (0.82, 11.63), Target: (3.18, 7.10),
+# (3.49, 10.90), Target: (3.63, 5.83)
+# (6.05, 9.45), Target: (4.12, 4.77),
+# (7.01, 8.11), Target: (4.89, 3.54),
+# (7.38, 5.63), Target: (8.98, 0.86)
+# (7.07, 4.01), Target: (10.76, 0.51),
+# (6.93, 3.47), Target: (10.96, 0.49),
 
 df = pd.read_csv('track_gps.csv')
 

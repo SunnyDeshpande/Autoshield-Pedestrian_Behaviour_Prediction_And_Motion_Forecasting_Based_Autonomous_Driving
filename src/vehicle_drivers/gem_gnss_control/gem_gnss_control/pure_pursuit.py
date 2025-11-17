@@ -246,16 +246,17 @@ class PurePursuit(Node):
         y = local_y - self.offset * math.sin(yaw)
         return x, y, yaw
 
-    def publish_visualization_markers(self, target_x, target_y):
+    def publish_visualization_markers(self, target_x, target_y, ld):
+        # draw waypoints
         waypoints_marker = Marker()
-        waypoints_marker.header.frame_id = "base_link"
+        waypoints_marker.header.frame_id = "map"
         waypoints_marker.header.stamp = self.get_clock().now().to_msg()
         waypoints_marker.ns = "waypoints"
         waypoints_marker.id = 0
         waypoints_marker.type = Marker.POINTS
         waypoints_marker.action = Marker.ADD
-        waypoints_marker.scale.x = 2.0
-        waypoints_marker.scale.y = 2.0
+        waypoints_marker.scale.x = 1.0
+        waypoints_marker.scale.y = 1.0
         waypoints_marker.color.r = 1.0
         waypoints_marker.color.g = 1.0
         waypoints_marker.color.b = 1.0
@@ -269,8 +270,9 @@ class PurePursuit(Node):
 
         self.waypoints_pub.publish(waypoints_marker)
 
+        # draw next waypoint
         next_waypoint_marker = Marker()
-        next_waypoint_marker.header.frame_id = "base_link"
+        next_waypoint_marker.header.frame_id = "map"
         next_waypoint_marker.header.stamp = self.get_clock().now().to_msg()
         next_waypoint_marker.ns = "next_waypoint"
         next_waypoint_marker.id = 1
@@ -279,15 +281,40 @@ class PurePursuit(Node):
         next_waypoint_marker.pose.position.x = target_x
         next_waypoint_marker.pose.position.y = target_y
         next_waypoint_marker.pose.position.z = 0.0
-        next_waypoint_marker.scale.x = 2.0
-        next_waypoint_marker.scale.y = 2.0
-        next_waypoint_marker.scale.z = 2.0
+        next_waypoint_marker.scale.x = 1.0
+        next_waypoint_marker.scale.y = 1.0
+        next_waypoint_marker.scale.z = 1.0
         next_waypoint_marker.color.r = 0.0
         next_waypoint_marker.color.g = 1.0
         next_waypoint_marker.color.b = 0.0
         next_waypoint_marker.color.a = 1.0
 
         self.next_waypoint_pub.publish(next_waypoint_marker)
+
+        # draw lookahead circle
+        ring_marker = Marker()
+        ring_marker.header.frame_id = "base_link"
+        ring_marker.header.stamp = self.get_clock().now().to_msg()
+        ring_marker.ns = "lookahead_ring"
+        ring_marker.id = 2
+        ring_marker.type = Marker.LINE_STRIP
+        ring_marker.action = Marker.ADD
+        ring_marker.scale.x = 0.5
+        ring_marker.color.r = 0.0
+        ring_marker.color.g = 0.0
+        ring_marker.color.b = 1.0
+        ring_marker.color.a = 1.0
+
+        segments = 72
+        for i in range(segments + 1):
+            theta = 2.0 * math.pi * (i / segments)
+            p = Point()
+            p.x = ld * math.cos(theta)
+            p.y = ld * math.sin(theta)
+            p.z = 0.0
+            ring_marker.points.append(p)
+
+        self.next_waypoint_pub.publish(ring_marker)
 
     def control_loop(self):
         joy_enable = self.check_joystick_enable()
@@ -367,7 +394,7 @@ class PurePursuit(Node):
             self.global_cmd.enable = True
             self.global_pub.publish(self.global_cmd)
 
-            self.publish_visualization_markers(target_x, target_y)
+            self.publish_visualization_markers(target_x, target_y, ld)
             self.get_logger().info(f"Pos: ({curr_x:.2f}, {curr_y:.2f}), Target: ({target_x:.2f}, {target_y:.2f}), yaw: {math.degrees(curr_yaw):.2f}, Steer Cmd: {steering_wheel_angle:.2f} deg, Speed: {self.speed:.2f} m/s, Throttle Cmd: {throttle_cmd:.2f} m/s²")
             
 

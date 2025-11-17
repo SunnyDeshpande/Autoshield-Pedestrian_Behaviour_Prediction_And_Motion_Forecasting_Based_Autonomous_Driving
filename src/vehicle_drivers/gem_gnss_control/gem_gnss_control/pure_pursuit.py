@@ -85,6 +85,7 @@ class PurePursuit(Node):
         super().__init__('pure_pursuit_node')
         # Declare parameters with default values
         self.declare_parameter('rate_hz', 20)
+        # self.declare_parameter('rate_hz', 10)
         self.declare_parameter('look_ahead', 5.0)
         self.declare_parameter('wheelbase', 2.57)
         self.declare_parameter('offset', 1.26)
@@ -210,6 +211,16 @@ class PurePursuit(Node):
         angle = abs(f_angle)
         steer_angle = -0.1084 * angle ** 2 + 21.775 * angle
         return round(steer_angle if f_angle >= 0 else -steer_angle, 2)
+
+    # def front2steer(f_angle):
+    #     steering_ratio = 13
+    #     return f_angle * steering_ratio
+
+    # def front2steer(f_angle):
+    #     angle = abs(f_angle)
+    #     steer = -0.05*angle**2 + 13*angle
+    #     return steer if f_angle >= 0 else -steer
+
 
     def check_joystick_enable(self):
         pygame.event.pump()

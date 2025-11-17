@@ -330,10 +330,8 @@ class PurePursuit(Node):
 
             target_x = self.path_points_x[self.goal]
             target_y = self.path_points_y[self.goal]
-
-            self.get_logger().info(f"Goal index: {self.goal}, Target Position: ({target_x}, {target_y}), current Position: ({curr_x}, {curr_y}), Look-ahead distance: {ld}")
-
             target_yaw = self.path_points_heading[self.goal]
+            
             alpha = math.atan2(target_y - curr_y, target_x - curr_x) - curr_yaw
             curvature = 0.0 if self.speed < 0.2 else 2.0 * math.sin(alpha) / ld
             steering_angle = math.atan(self.wheelbase * curvature)
@@ -359,7 +357,7 @@ class PurePursuit(Node):
             self.global_pub.publish(self.global_cmd)
 
             self.publish_visualization_markers(target_x, target_y)
-            self.get_logger().info(f"Pos: ({curr_x:.2f}, {curr_y:.2f}), Target: ({target_x:.2f}, {target_y:.2f}), Speed: {self.speed:.2f}, Throttle: {throttle_cmd:.2f}, Steering: {steering_wheel_angle:.2f}")
+            self.get_logger().info(f"Pos: ({curr_x:.2f}, {curr_y:.2f}), Target: ({target_x:.2f}, {target_y:.2f}), yaw: {math.degrees(curr_yaw):.2f}, Steer Cmd: {steering_wheel_angle:.2f} deg, Speed: {self.speed:.2f} m/s, Throttle Cmd: {throttle_cmd:.2f} m/s²")
             
 
 def main(args=None):

@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'pure_pursuit = gem_gnss_control.pure_pursuit:main',
             'pure_pursuit_test = gem_gnss_control.pure_pursuit_test:main',
+            'pedestrian_safety_bridge = gem_gnss_control.pedestrian_safety_bridge:main',
         ],
     },
 )

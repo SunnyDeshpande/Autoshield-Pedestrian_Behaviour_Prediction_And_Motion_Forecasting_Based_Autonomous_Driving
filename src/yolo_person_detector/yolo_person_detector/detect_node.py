@@ -140,6 +140,7 @@ class YoloV11PersonDetector(Node):
         self.pub_debug = self.create_publisher(Image, 'detections/image', 10) if self.publish_debug else None
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         self.pub_marker = self.create_publisher(Marker, 'person_marker', 10)
         self.pub_path_marker = self.create_publisher(Marker, 'person_path', 10)
         self.pub_prediction_marker = self.create_publisher(Marker, 'person_prediction', 10)
@@ -153,9 +154,13 @@ class YoloV11PersonDetector(Node):
         # ---------------- State ----------------
 =======
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
+=======
+        # FPS measurement (wall clock is fine here)
+>>>>>>> b4cf006 (upgraded detect_node)
         self.last_fps_t = time.time()
         self.frame_count = 0
 
+        # Simple buffers (not per-ID, just global)
         self.x_vel_buffer = []
         self.y_vel_buffer = []
 <<<<<<< HEAD
@@ -682,24 +687,25 @@ class YoloV11PersonDetector(Node):
     # ------------------------------------------------------------------
 =======
 
-        self.prev_boxes = []          # (x1, y1, x2, y2)
-        self.prev_time = None
-        self.prev_corners_vel = None  # list of 4 (vx, vy)
+        self.prev_boxes = []          # list of (x1, y1, x2, y2) from previous frame
+        self.prev_time = None         # timestamp of previous frame (seconds)
+        self.prev_corners_vel = None  # list of 4 (vx, vy) from previous frame
 
         self.get_logger().info("YOLOv11 person detector ready.")
 
     @staticmethod
     def _point_in_triangle(px, py, x1, y1, x2, y2, x3, y3):
-        denom = ( (y2 - y3)*(x1 - x3) + (x3 - x2)*(y1 - y3) )
+        denom = ((y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3))
         if abs(denom) < 1e-6:
             return False
-        a = ((y2 - y3)*(px - x3) + (x3 - x2)*(py - y3)) / denom
-        b = ((y3 - y1)*(px - x3) + (x1 - x3)*(py - y3)) / denom
+        a = ((y2 - y3) * (px - x3) + (x3 - x2) * (py - y3)) / denom
+        b = ((y3 - y1) * (px - x3) + (x1 - x3) * (py - y3)) / denom
         c = 1.0 - a - b
         return (0.0 <= a <= 1.0) and (0.0 <= b <= 1.0) and (0.0 <= c <= 1.0)
 
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
     def image_cb(self, msg: Image):
+        # Convert to OpenCV image
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except Exception as e:
@@ -747,6 +753,7 @@ class YoloV11PersonDetector(Node):
         bottom_right_yellow = (x_right_sixth, h - 1)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         stamp = msg.header.stamp
         t_now = float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
@@ -761,12 +768,20 @@ class YoloV11PersonDetector(Node):
 =======
         now = self.get_clock().now()
         t_now = now.nanoseconds * 1e-9
+=======
+        # Use the camera's timestamp, not node clock
+        stamp = msg.header.stamp
+        t_now = float(stamp.sec) + float(stamp.nanosec) * 1e-9
+
+>>>>>>> b4cf006 (upgraded detect_node)
         dt = None
         if self.prev_time is not None:
             dt = t_now - self.prev_time
-            if dt <= 0:
+            if dt <= 0.0:
+                # If something weird, ignore dt for this step
                 dt = None
 
+        # Run YOLO
         results = self.model.predict(
             source=cv_image,
             verbose=False,
@@ -801,6 +816,7 @@ class YoloV11PersonDetector(Node):
                 bw = (x2 - x1)
                 bh = (y2 - y1)
 
+<<<<<<< HEAD
 <<<<<<< HEAD
                 vx = vy = 0.0
                 ax = ay = 0.0
@@ -840,6 +856,9 @@ class YoloV11PersonDetector(Node):
                             accel_candidates.append((ax_c, ay_c))
                             accel_speeds.append(ax_c ** 2 + ay_c ** 2)
 =======
+=======
+                # Velocity and acceleration in "meters per second" approx
+>>>>>>> b4cf006 (upgraded detect_node)
                 vx = 0.0
                 vy = 0.0
                 ax = 0.0
@@ -848,12 +867,14 @@ class YoloV11PersonDetector(Node):
                 vel_candidates_scaled = None
 
                 if dt is not None and len(self.prev_boxes) > 0:
+                    # Compute centers of previous boxes
                     px_cx_cy = []
                     for (px1, py1, px2, py2) in self.prev_boxes:
                         pcx = (px1 + px2) / 2.0
                         pcy = (py1 + py2) / 2.0
                         px_cx_cy.append((pcx, pcy))
 
+                    # Nearest previous box by center
                     dists = [
                         (pcx - cx) ** 2 + (pcy - cy) ** 2
                         for (pcx, pcy) in px_cx_cy
@@ -861,6 +882,7 @@ class YoloV11PersonDetector(Node):
                     j = int(np.argmin(dists))
                     px1, py1, px2, py2 = self.prev_boxes[j]
 
+                    # 4 corners previous and current
                     prev_corners = [
                         (px1, py1),
                         (px2, py1),
@@ -874,6 +896,7 @@ class YoloV11PersonDetector(Node):
                         (x2, y2),
                     ]
 
+                    # Pixel-space velocities (px/s)
                     vel_candidates_px = []
                     for (cx_prev, cy_prev), (cx_curr, cy_curr) in zip(prev_corners, curr_corners):
                         dx = cx_curr - cx_prev
@@ -882,6 +905,7 @@ class YoloV11PersonDetector(Node):
                         vy_c = dy / dt
                         vel_candidates_px.append((vx_c, vy_c))
 
+                    # Approximate pixel → meters scaling by assuming person height ~1.7 m
                     person_height_m = 1.7
                     bbox_height_px = max(bh, 1.0)
                     meters_per_pixel = person_height_m / bbox_height_px
@@ -891,6 +915,7 @@ class YoloV11PersonDetector(Node):
                         for (vx_c, vy_c) in vel_candidates_px
                     ]
 
+                    # Pick the corner with minimum speed for stability
                     speeds = [
                         vx_s ** 2 + vy_s ** 2
                         for (vx_s, vy_s) in vel_candidates_scaled
@@ -898,6 +923,7 @@ class YoloV11PersonDetector(Node):
                     min_v_idx = int(np.argmin(speeds))
                     vx, vy = vel_candidates_scaled[min_v_idx]
 
+                    # Acceleration estimate (difference of velocities / dt)
                     if (
                         self.prev_corners_vel is not None
                         and len(self.prev_corners_vel) == 4
@@ -917,6 +943,7 @@ class YoloV11PersonDetector(Node):
                         min_a_idx = int(np.argmin(accel_speeds))
                         ax, ay = accel_candidates[min_a_idx]
 
+                # Store corner velocities for next frame
                 if vel_candidates_scaled is not None:
                     self.prev_corners_vel = vel_candidates_scaled
                 else:
@@ -925,9 +952,13 @@ class YoloV11PersonDetector(Node):
                 curr_boxes.append((x1, y1, x2, y2))
 
 <<<<<<< HEAD
+<<<<<<< HEAD
                 # Velocity buffers
 =======
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
+=======
+                # Simple global buffers (you might later do per-ID buffers)
+>>>>>>> b4cf006 (upgraded detect_node)
                 self.x_vel_buffer.append(vx)
                 self.y_vel_buffer.append(vy)
                 if len(self.x_vel_buffer) > self.x_vel_buffer_length:
@@ -936,10 +967,14 @@ class YoloV11PersonDetector(Node):
                     self.y_vel_buffer.pop(0)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
                 # Detection2D for vision_msgs
                 det = Detection2D()
                 det.header = msg.header
 =======
+=======
+                # Fill Detection2D message
+>>>>>>> b4cf006 (upgraded detect_node)
                 det = Detection2D()
                 det.header = msg.header
 
@@ -994,6 +1029,7 @@ class YoloV11PersonDetector(Node):
 
                 det_msg.detections.append(det)
 
+                # Debug drawing and crude "crossing" logic
                 if debug_img is not None:
                     p1 = (int(x1), int(y1))
                     p2 = (int(x2), int(y2))
@@ -1001,6 +1037,7 @@ class YoloV11PersonDetector(Node):
                     color = (0, 255, 0)
                     crossing = False
 
+                    # crude gating on x-acc to ignore crazy jitter
                     if abs(ax) < 30.0:
                         in_left_fan = self._point_in_triangle(
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
@@ -1030,7 +1067,8 @@ class YoloV11PersonDetector(Node):
                     label = f"person {score:.2f}, {'CROSSING' if crossing else 'CAUTION'}"
 =======
 
-                        if (in_left_fan or in_right_fan) and abs(vy/(vx+0.001)) < 0.5:
+                        # vy / vx ratio to see if motion is mostly vertical in image
+                        if (in_left_fan or in_right_fan) and abs(vy / (vx + 0.001)) < 0.5:
                             crossing = True
                             color = (0, 0, 255)       # red
                         else:
@@ -1100,9 +1138,11 @@ class YoloV11PersonDetector(Node):
                     else:
                         print(f"Detection: vx={vx:.2f}, vy={vy:.2f}, ax={ax:.2f}, ay={ay:.2f}, CAUTION")
 
+        # Save for next frame
         self.prev_boxes = curr_boxes
         self.prev_time = t_now
 
+        # Draw fan lines on debug image
         if debug_img is not None:
             cv2.line(debug_img, bottom_left_red, top_center, (0, 0, 255), 2)
             cv2.line(debug_img, bottom_right_red, top_center, (0, 0, 255), 2)
@@ -1110,14 +1150,20 @@ class YoloV11PersonDetector(Node):
             cv2.line(debug_img, bottom_left_yellow, top_left_yellow, (0, 255, 255), 2)
             cv2.line(debug_img, bottom_right_yellow, top_right_yellow, (0, 255, 255), 2)
 
+        # Publish detections
         self.pub_dets.publish(det_msg)
 
+<<<<<<< HEAD
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
+=======
+        # Publish debug image
+>>>>>>> b4cf006 (upgraded detect_node)
         if debug_img is not None and self.pub_debug is not None:
             out_msg = self.bridge.cv2_to_imgmsg(debug_img, encoding='bgr8')
             out_msg.header = msg.header
             self.pub_debug.publish(out_msg)
 
+<<<<<<< HEAD
 <<<<<<< HEAD
         # Delete markers for dead tracks
         for tid in deleted_ids:
@@ -1331,6 +1377,9 @@ class YoloV11PersonDetector(Node):
         # FPS logging
 =======
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
+=======
+        # FPS logging (still using wall clock)
+>>>>>>> b4cf006 (upgraded detect_node)
         self.frame_count += 1
         if self.frame_count % 30 == 0:
             now_t = time.time()

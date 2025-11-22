@@ -151,7 +151,7 @@ class StanleyController(Node):
         self.global_pub = self.create_publisher(GlobalCmd, '/pacmod/global_cmd', 10)
         self.gear_pub = self.create_publisher(SystemCmdInt, '/pacmod/shift_cmd', 10)
         self.brake_pub = self.create_publisher(SystemCmdFloat, '/pacmod/brake_cmd', 10)
-        self.accel_pub = self.create_publisher(SystemCmdFloat, '/accel_cmd', 10)
+        self.accel_pub = self.create_publisher(SystemCmdFloat, '/pacmod/accel_cmd', 10)
         self.turn_pub = self.create_publisher(SystemCmdInt, '/pacmod/turn_cmd', 10)
         self.steer_pub = self.create_publisher(PositionWithSpeed, '/pacmod/steering_cmd', 10)
         self.waypoints_pub = self.create_publisher(Marker, '/visualization/waypoints', 10)
@@ -221,8 +221,14 @@ class StanleyController(Node):
         f_angle = max(min(f_angle, 35), -35)
         angle = abs(f_angle)
         steer_angle = -0.1084 * angle ** 2 + 21.775 * angle
-        return round(steer_angle if f_angle >= 0 else -steer_angle, 2)
-
+        result = steer_angle if f_angle >= 0 else -steer_angle
+        
+        # Double-check output
+        if abs(result) > 450:
+            self.get_logger().error(f"Invalid steering wheel angle: {result}° - Clamping to ±450°")
+            result = max(min(result, 450), -450)
+    
+    return round(result, 2)
     def check_joystick_enable(self):
         pygame.event.pump()
         try:
@@ -385,25 +391,6 @@ class StanleyController(Node):
 
             curr_x, curr_y, curr_yaw = self.get_gem_state()
             
-            min_dist = float('inf')
-            self.goal = 0
-            for i in range(self.wp_size):
-                self.dist_arr[i] = self.dist(
-                    (self.path_points_x[i], self.path_points_y[i]), 
-                    (curr_x, curr_y)
-                )
-                dx = self.path_points_x[i] - curr_x
-                dy = self.path_points_y[i] - curr_y
-                angle_to_wp = math.atan2(dy, dx)
-                angle_diff = self.normalize_angle(angle_to_wp - curr_yaw)
-
-                if abs(angle_diff) < math.pi/2 and self.dist_arr[i] < min_dist:
-                    min_dist = self.dist_arr[i]
-                    self.goal = i
-                else:
-                    self.get_logger().error("No valid waypoint found ahead of vehicle")
-                    self.get_logger().error(f"Angle diff: {math.degrees(angle_diff):.2f}°, Dist: {self.dist_arr[i]:.2f}m")
-                    self.get_logger().error("Pls Turn vehicle around No Waypoints ahead")
             target_x = self.path_points_x[self.goal]
             target_y = self.path_points_y[self.goal]
             path_yaw = self.heading_to_yaw(self.path_points_heading[self.goal])

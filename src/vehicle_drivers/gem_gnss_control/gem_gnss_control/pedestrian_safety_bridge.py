@@ -14,7 +14,7 @@ import math
 from std_msgs.msg import Float64, String, Bool
 from geometry_msgs.msg import Point
 
-# Placeholder for perception output, replace with actual perception message types
+# Placeholder for perception output, need to replace with actual perception message types
 class PedestrianState:
     """Placeholder for pedestrian state from perception"""
     def __init__(self):
@@ -88,7 +88,7 @@ class PedestrianSafetyBridge(Node):
         self.current_action = "NORMAL"  # NORMAL, SLOW, STOP
         self.target_speed = self.normal_speed
         
-        # Subscribe to perception outputs (PLACEHOLDER TOPICS - replace with actual)
+        # Subscribe to perception outputs (PLACEHOLDER TOPICS - need to replace with actual)
         self.create_subscription(
             Bool, 
             '/perception/pedestrian_detected', 
@@ -117,7 +117,7 @@ class PedestrianSafetyBridge(Node):
         # Subscribe to vehicle speed (from pure pursuit or pacmod)
         self.create_subscription(
             Float64,
-            '/vehicle_speed',  # Or use /pacmod/vehicle_speed_rpt
+            '/vehicle_speed',  # Or /pacmod/vehicle_speed_rpt
             self.vehicle_speed_callback,
             10
         )
@@ -180,8 +180,7 @@ class PedestrianSafetyBridge(Node):
     
     def safety_logic_callback(self):
         """
-        Main safety decision logic 
-        Determines action based on pedestrian state and calculates speed commands
+        action based on pedestrian state and calculates speed commands
         """
         
         # Default: no override (pure pursuit runs normally)
@@ -206,7 +205,7 @@ class PedestrianSafetyBridge(Node):
                 self.max_decel
             )
             
-            # -------- CASE 1: PARALLEL (walking parallel to road) --------
+            # CASE 1: PARALLEL (walking parallel to road)
             if self.pedestrian_behavior == "PARALLEL":
                 action = "NORMAL"
                 target_speed = self.normal_speed
@@ -215,7 +214,7 @@ class PedestrianSafetyBridge(Node):
                     throttle_duration_sec=2.0
                 )
             
-            # -------- CASE 2: APPROACHING (walking toward road, not yet on it) --------
+            # CASE 2: APPROACHING (walking toward road, not yet on it) 
             elif self.pedestrian_behavior == "APPROACHING":
                 if self.pedestrian_distance > self.slow_zone_distance:
                     # Far away - continue normally
@@ -227,7 +226,7 @@ class PedestrianSafetyBridge(Node):
                     action = "SLOW"
                     target_speed = self.normal_speed * self.slow_speed_factor
                     
-                    # Calculate smooth deceleration
+                    # smooth deceleration
                     target_speed = self.calculate_smooth_deceleration(
                         self.current_speed,
                         target_speed,
@@ -251,7 +250,7 @@ class PedestrianSafetyBridge(Node):
                         f"Preparing to STOP"
                     )
             
-            # -------- CASE 3: STOPPED (was approaching, now stopped before road) --------
+            # CASE 3: STOPPED (was approaching, now stopped before road) 
             elif self.pedestrian_behavior == "STOPPED":
                 # Pedestrian stopped - gradually resume normal speed
                 action = "RESUME"
@@ -263,7 +262,7 @@ class PedestrianSafetyBridge(Node):
                     # Still close - maintain slow speed
                     target_speed = self.normal_speed * self.slow_speed_factor
                 
-                # Gradual acceleration (not instant)
+                # Gradual acceleration 
                 target_speed = self.calculate_smooth_acceleration(
                     self.current_speed,
                     target_speed
@@ -275,7 +274,7 @@ class PedestrianSafetyBridge(Node):
                     throttle_duration_sec=1.0
                 )
             
-            # -------- CASE 4: CROSSING (pedestrian on road, moving across) --------
+            # CASE 4: CROSSING (pedestrian on road, moving across) 
             elif self.pedestrian_behavior == "CROSSING":    
                 # Check if we can stop in time
                 distance_available = self.pedestrian_distance - self.min_detection_range - self.safety_margin
@@ -285,7 +284,7 @@ class PedestrianSafetyBridge(Node):
                     action = "STOP"
                     target_speed = 0.0
                     
-                    # Calculate braking profile
+                    # braking profile
                     target_speed = self.calculate_smooth_braking(
                         self.current_speed,
                         distance_available,
@@ -310,29 +309,29 @@ class PedestrianSafetyBridge(Node):
                         f"available: {distance_available:.2f}m)"
                     )
             
-            # -------- WARNING: Entering blind spot --------
+            # WARNING: Entering blind spot
             if self.pedestrian_distance < (self.min_detection_range + 1.0):
                 self.get_logger().warn(
                     f"Pedestrian entering blind spot! Distance: {self.pedestrian_distance:.2f}m"
                 )
         
         # ============ PUBLISH COMMANDS ============
-        # Publish speed override
+        # speed override
         speed_msg = Float64()
         speed_msg.data = target_speed
         self.speed_override_pub.publish(speed_msg)
         
-        # Publish emergency brake flag
+        # emergency brake flag
         brake_msg = Bool()
         brake_msg.data = emergency_brake
         self.brake_override_pub.publish(brake_msg)
         
-        # Publish action for logging
+        # action for logging
         action_msg = String()
         action_msg.data = action
         self.action_pub.publish(action_msg)
         
-        # Publish detailed status
+        # status
         status_msg = String()
         status_msg.data = (
             f"Action: {action}, "
@@ -389,7 +388,7 @@ class PedestrianSafetyBridge(Node):
         dt = 0.05
         new_speed = current_speed - decel * dt
         
-        # Don't overshoot target
+        # Don't overshoot target....not sure
         new_speed = max(new_speed, target_speed)
         
         return new_speed

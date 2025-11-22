@@ -125,7 +125,7 @@ class GNSSImage(Node):
             lat_w, lon_w, _ = self.enu_to_geodetic(wp.x, wp.y, 0.0)
             pix_x = int(self.img_width * (lon_w - self.lon_start_l) / self.lon_scale)
             pix_y = int(self.img_height - self.img_height * (lat_w - self.lat_start_bt) / self.lat_scale)
-            cv2.circle(pub_image, (pix_x, pix_y), 3, (255, 255, 255), -1)
+            cv2.circle(pub_image, (pix_x, pix_y), 6, (255, 255, 255), -1)
             if self.waypoints and (wp == self.waypoints[0] or wp == self.waypoints[1] or wp == self.waypoints[2]):
                 self.get_logger().info(f"Waypoint (pix): x: {pix_x}, y: {pix_y}  (lat,lon)=({lat_w:.7f},{lon_w:.7f})")
 
@@ -134,7 +134,7 @@ class GNSSImage(Node):
             lat_n, lon_n, _ = self.enu_to_geodetic(self.next_waypoint.x, self.next_waypoint.y, 0.0)
             nxt_x = int(self.img_width * (lon_n - self.lon_start_l) / self.lon_scale)
             nxt_y = int(self.img_height - self.img_height * (lat_n - self.lat_start_bt) / self.lat_scale)
-            cv2.circle(pub_image, (nxt_x, nxt_y), 8, (0, 255, 0), -1)
+            cv2.circle(pub_image, (nxt_x, nxt_y), 10, (0, 255, 0), -1)
             self.get_logger().info(f"Next Waypoint: pix_x: {nxt_x}, pix_y: {nxt_y}  (lat,lon)=({lat_n:.7f},{lon_n:.7f})")
 
         try:

@@ -56,12 +56,12 @@ class GEMRvizMarker(Node):
 
     def waypoints_callback(self, msg: Marker):
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "base_link"
+        msg.header.frame_id = "map"
         self.publisher.publish(msg)
 
     def next_waypoint_callback(self, msg: Marker):
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "base_link"
+        msg.header.frame_id = "map"
         self.publisher.publish(msg)
 
     def publish_text_marker(self):

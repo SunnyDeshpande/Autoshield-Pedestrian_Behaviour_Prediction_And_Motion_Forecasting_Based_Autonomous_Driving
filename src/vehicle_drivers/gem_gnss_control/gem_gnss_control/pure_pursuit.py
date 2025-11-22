@@ -86,7 +86,7 @@ class PurePursuit(Node):
         # Declare parameters with default values
         self.declare_parameter('rate_hz', 20)
         # self.declare_parameter('rate_hz', 10)
-        self.declare_parameter('look_ahead', 5.0)
+        self.declare_parameter('look_ahead', 8.0)
         self.declare_parameter('wheelbase', 2.57)
         self.declare_parameter('offset', 1.26)
         self.declare_parameter('origin_lat', 40.0927422)
@@ -371,7 +371,8 @@ class PurePursuit(Node):
             target_yaw = self.path_points_heading[self.goal]
             
             alpha = math.atan2(target_y - curr_y, target_x - curr_x) - curr_yaw
-            curvature = 0.0 if self.speed < 0.2 else 2.0 * math.sin(alpha) / ld
+            # curvature = 0.0 if self.speed < 0.2 else 2.0 * math.sin(alpha) / ld
+            curvature = 2.0 * math.sin(alpha) / ld
             steering_angle = math.atan(self.wheelbase * curvature)
             steering_wheel_angle = self.front2steer(math.degrees(steering_angle))
 

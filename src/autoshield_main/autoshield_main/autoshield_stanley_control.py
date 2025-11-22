@@ -14,6 +14,8 @@ from std_msgs.msg import Bool
 from pacmod2_msgs.msg import PositionWithSpeed, VehicleSpeedRpt, GlobalCmd, SystemCmdFloat, SystemCmdInt
 from sensor_msgs.msg import NavSatFix
 from septentrio_gnss_driver.msg import INSNavGeod
+from visualization_msgs.msg import Marker
+from geometry_msgs.msg import Point
 
 # Initialize pygame for joystick
 pygame.init()
@@ -151,7 +153,9 @@ class StanleyController(Node):
         self.accel_pub = self.create_publisher(SystemCmdFloat, '/accel_cmd', 10)
         self.turn_pub = self.create_publisher(SystemCmdInt, '/pacmod/turn_cmd', 10)
         self.steer_pub = self.create_publisher(PositionWithSpeed, '/pacmod/steering_cmd', 10)
-
+        self.waypoints_pub = self.create_publisher(Marker, '/visualization/waypoints', 10)
+        self.next_waypoint_pub = self.create_publisher(Marker, '/visualization/next_waypoint', 10)
+        
         # Commands
         self.global_cmd = GlobalCmd(enable=False, clear_override=True)
         self.gear_cmd = SystemCmdInt(command=2)  # NEUTRAL
@@ -261,6 +265,88 @@ class StanleyController(Node):
         steering_angle = max(min(steering_angle, max_steer), -max_steer)
         return steering_angle, heading_error, cross_track_error
 
+    def publish_visualization_markers(self, target_x, target_y, cross_track_error):
+        """
+        Publish visualization markers for RViz:
+        1. All waypoints (white points)
+        2. Next target waypoint (green sphere)
+        3. Cross-track error indicator (red line from vehicle to path)
+        """
+        # Draw all waypoints
+        waypoints_marker = Marker()
+        waypoints_marker.header.frame_id = "map"
+        waypoints_marker.header.stamp = self.get_clock().now().to_msg()
+        waypoints_marker.ns = "waypoints"
+        waypoints_marker.id = 0
+        waypoints_marker.type = Marker.POINTS
+        waypoints_marker.action = Marker.ADD
+        waypoints_marker.scale.x = 1.0
+        waypoints_marker.scale.y = 1.0
+        waypoints_marker.color.r = 1.0
+        waypoints_marker.color.g = 1.0
+        waypoints_marker.color.b = 1.0
+        waypoints_marker.color.a = 1.0
+
+        for x, y in zip(self.path_points_x, self.path_points_y):
+            p = Point()
+            p.x = x
+            p.y = y
+            p.z = 0.0
+            waypoints_marker.points.append(p)
+
+        self.waypoints_pub.publish(waypoints_marker)
+
+        # Draw next target waypoint
+        next_waypoint_marker = Marker()
+        next_waypoint_marker.header.frame_id = "map"
+        next_waypoint_marker.header.stamp = self.get_clock().now().to_msg()
+        next_waypoint_marker.ns = "next_waypoint"
+        next_waypoint_marker.id = 1
+        next_waypoint_marker.type = Marker.SPHERE
+        next_waypoint_marker.action = Marker.ADD
+        next_waypoint_marker.pose.position.x = target_x
+        next_waypoint_marker.pose.position.y = target_y
+        next_waypoint_marker.pose.position.z = 0.0
+        next_waypoint_marker.scale.x = 1.0
+        next_waypoint_marker.scale.y = 1.0
+        next_waypoint_marker.scale.z = 1.0
+        next_waypoint_marker.color.r = 0.0
+        next_waypoint_marker.color.g = 1.0
+        next_waypoint_marker.color.b = 0.0
+        next_waypoint_marker.color.a = 1.0
+
+        self.next_waypoint_pub.publish(next_waypoint_marker)
+
+        # Draw cross-track error visualization (line from vehicle to path)
+        cte_marker = Marker()
+        cte_marker.header.frame_id = "base_link"
+        cte_marker.header.stamp = self.get_clock().now().to_msg()
+        cte_marker.ns = "cross_track_error"
+        cte_marker.id = 2
+        cte_marker.type = Marker.LINE_STRIP
+        cte_marker.action = Marker.ADD
+        cte_marker.scale.x = 0.1
+        cte_marker.color.r = 1.0
+        cte_marker.color.g = 0.0
+        cte_marker.color.b = 0.0
+        cte_marker.color.a = 1.0
+
+        # Start point (vehicle position)
+        p1 = Point()
+        p1.x = 0.0
+        p1.y = 0.0
+        p1.z = 0.0
+        cte_marker.points.append(p1)
+
+        # End point (perpendicular to path)
+        p2 = Point()
+        p2.x = 0.0
+        p2.y = cross_track_error
+        p2.z = 0.0
+        cte_marker.points.append(p2)
+
+        self.next_waypoint_pub.publish(cte_marker)
+    
     def control_loop(self):
         joy_enable = self.check_joystick_enable()
 
@@ -345,6 +431,9 @@ class StanleyController(Node):
 
             self.global_cmd.enable = True
             self.global_pub.publish(self.global_cmd)
+            
+            # Publish visualization markers
+            self.publish_visualization_markers(target_x, target_y, cross_track_error)
 
             self.get_logger().info(
                 f"Stanley - Goal: {self.goal}/{self.wp_size}, "

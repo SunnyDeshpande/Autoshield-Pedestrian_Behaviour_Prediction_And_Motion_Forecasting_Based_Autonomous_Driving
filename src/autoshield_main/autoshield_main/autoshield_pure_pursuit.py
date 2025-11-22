@@ -263,26 +263,6 @@ class PurePursuit(Node):
             curr_x, curr_y, curr_yaw = self.get_gem_state()
             
             
-            #New Code Added Here 
-            #based on the orientation of the vehicle, find the closest waypoint in front of the vehicle
-            min_dist = float('inf')
-            self.goal = 0
-            for i in range(self.wp_size):
-                self.dist_arr[i] = self.dist((self.path_points_x[i], self.path_points_y[i]), (curr_x, curr_y))
-                dx = self.path_points_x[i] - curr_x
-                dy = self.path_points_y[i] - curr_y
-                angle_to_wp = math.atan2(dy, dx)
-                angle_diff = abs(angle_to_wp - curr_yaw)
-                
-                if angle_diff < math.pi/2 and self.dist_arr[i] < min_dist:
-                    min_dist = self.dist_arr[i]
-                    self.goal = i
-
-            ld = self.look_ahead + max(0.0, self.speed - 2.5) * 2
-            for i in range(self.goal, self.wp_size):
-                if self.dist_arr[i] > ld:
-                    self.goal = i
-                    break
 
             target_x = self.path_points_x[self.goal]
             target_y = self.path_points_y[self.goal]

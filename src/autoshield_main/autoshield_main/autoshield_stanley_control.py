@@ -412,7 +412,9 @@ class StanleyController(Node):
             throttle_cmd = self.pid_speed.get_control(now, speed_error)
             throttle_cmd = max(0.0, min(throttle_cmd, self.max_accel))
 
-            self.accel_cmd.command = throttle_cmd
+            self.accel_#New Code Added Here 
+            #based on the orientation of the vehicle, find the closest waypoint in front of the vehicle
+            cmd.command = throttle_cmd
             self.brake_cmd.command = 0.0
             self.accel_pub.publish(self.accel_cmd)
             self.brake_pub.publish(self.brake_cmd)

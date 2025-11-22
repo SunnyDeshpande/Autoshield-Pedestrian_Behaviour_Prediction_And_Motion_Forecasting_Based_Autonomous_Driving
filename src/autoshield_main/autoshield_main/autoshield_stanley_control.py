@@ -17,6 +17,7 @@ from septentrio_gnss_driver.msg import INSNavGeod
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point
 
+
 # Initialize pygame for joystick
 pygame.init()
 pygame.joystick.init()

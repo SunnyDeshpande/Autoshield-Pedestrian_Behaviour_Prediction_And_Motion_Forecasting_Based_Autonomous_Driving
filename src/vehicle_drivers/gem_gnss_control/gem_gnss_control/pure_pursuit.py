@@ -23,6 +23,8 @@ from std_msgs.msg import Bool
 from pacmod2_msgs.msg import PositionWithSpeed, VehicleSpeedRpt, GlobalCmd, SystemCmdFloat, SystemCmdInt
 from sensor_msgs.msg import NavSatFix
 from septentrio_gnss_driver.msg import INSNavGeod
+from visualization_msgs.msg import Marker
+from geometry_msgs.msg import Point
 
 # Initialize pygame for joystick
 pygame.init()
@@ -83,7 +85,8 @@ class PurePursuit(Node):
         super().__init__('pure_pursuit_node')
         # Declare parameters with default values
         self.declare_parameter('rate_hz', 20)
-        self.declare_parameter('look_ahead', 5.0)
+        # self.declare_parameter('rate_hz', 10)
+        self.declare_parameter('look_ahead', 8.0)
         self.declare_parameter('wheelbase', 2.57)
         self.declare_parameter('offset', 1.26)
         self.declare_parameter('origin_lat', 40.0927422)
@@ -143,6 +146,8 @@ class PurePursuit(Node):
         self.accel_pub = self.create_publisher(SystemCmdFloat, '/pacmod/accel_cmd', 10)
         self.turn_pub = self.create_publisher(SystemCmdInt, '/pacmod/turn_cmd', 10)
         self.steer_pub = self.create_publisher(PositionWithSpeed, '/pacmod/steering_cmd', 10)
+        self.waypoints_pub = self.create_publisher(Marker, '/visualization/waypoints', 10)
+        self.next_waypoint_pub = self.create_publisher(Marker, '/visualization/next_waypoint', 10)
 
         # Commands
         self.global_cmd = GlobalCmd(enable=False, clear_override = True)
@@ -207,6 +212,16 @@ class PurePursuit(Node):
         steer_angle = -0.1084 * angle ** 2 + 21.775 * angle
         return round(steer_angle if f_angle >= 0 else -steer_angle, 2)
 
+    # def front2steer(f_angle):
+    #     steering_ratio = 13
+    #     return f_angle * steering_ratio
+
+    # def front2steer(f_angle):
+    #     angle = abs(f_angle)
+    #     steer = -0.05*angle**2 + 13*angle
+    #     return steer if f_angle >= 0 else -steer
+
+
     def check_joystick_enable(self):
         pygame.event.pump()
         try:
@@ -230,6 +245,76 @@ class PurePursuit(Node):
         x = local_x - self.offset * math.cos(yaw)
         y = local_y - self.offset * math.sin(yaw)
         return x, y, yaw
+
+    def publish_visualization_markers(self, target_x, target_y, ld):
+        # draw waypoints
+        waypoints_marker = Marker()
+        waypoints_marker.header.frame_id = "map"
+        waypoints_marker.header.stamp = self.get_clock().now().to_msg()
+        waypoints_marker.ns = "waypoints"
+        waypoints_marker.id = 0
+        waypoints_marker.type = Marker.POINTS
+        waypoints_marker.action = Marker.ADD
+        waypoints_marker.scale.x = 1.0
+        waypoints_marker.scale.y = 1.0
+        waypoints_marker.color.r = 1.0
+        waypoints_marker.color.g = 1.0
+        waypoints_marker.color.b = 1.0
+        waypoints_marker.color.a = 1.0
+
+        for x, y in zip(self.path_points_x, self.path_points_y):
+            p = Point()
+            p.x = x
+            p.y = y
+            waypoints_marker.points.append(p)
+
+        self.waypoints_pub.publish(waypoints_marker)
+
+        # draw next waypoint
+        next_waypoint_marker = Marker()
+        next_waypoint_marker.header.frame_id = "map"
+        next_waypoint_marker.header.stamp = self.get_clock().now().to_msg()
+        next_waypoint_marker.ns = "next_waypoint"
+        next_waypoint_marker.id = 1
+        next_waypoint_marker.type = Marker.SPHERE
+        next_waypoint_marker.action = Marker.ADD
+        next_waypoint_marker.pose.position.x = target_x
+        next_waypoint_marker.pose.position.y = target_y
+        next_waypoint_marker.pose.position.z = 0.0
+        next_waypoint_marker.scale.x = 1.0
+        next_waypoint_marker.scale.y = 1.0
+        next_waypoint_marker.scale.z = 1.0
+        next_waypoint_marker.color.r = 0.0
+        next_waypoint_marker.color.g = 1.0
+        next_waypoint_marker.color.b = 0.0
+        next_waypoint_marker.color.a = 1.0
+
+        self.next_waypoint_pub.publish(next_waypoint_marker)
+
+        # draw lookahead circle
+        ring_marker = Marker()
+        ring_marker.header.frame_id = "base_link"
+        ring_marker.header.stamp = self.get_clock().now().to_msg()
+        ring_marker.ns = "lookahead_ring"
+        ring_marker.id = 2
+        ring_marker.type = Marker.LINE_STRIP
+        ring_marker.action = Marker.ADD
+        ring_marker.scale.x = 0.5
+        ring_marker.color.r = 0.0
+        ring_marker.color.g = 0.0
+        ring_marker.color.b = 1.0
+        ring_marker.color.a = 1.0
+
+        segments = 72
+        for i in range(segments + 1):
+            theta = 2.0 * math.pi * (i / segments)
+            p = Point()
+            p.x = ld * math.cos(theta)
+            p.y = ld * math.sin(theta)
+            p.z = 0.0
+            ring_marker.points.append(p)
+
+        self.next_waypoint_pub.publish(ring_marker)
 
     def control_loop(self):
         joy_enable = self.check_joystick_enable()
@@ -284,8 +369,10 @@ class PurePursuit(Node):
             target_x = self.path_points_x[self.goal]
             target_y = self.path_points_y[self.goal]
             target_yaw = self.path_points_heading[self.goal]
+            
             alpha = math.atan2(target_y - curr_y, target_x - curr_x) - curr_yaw
-            curvature = 0.0 if self.speed < 0.2 else 2.0 * math.sin(alpha) / ld
+            # curvature = 0.0 if self.speed < 0.2 else 2.0 * math.sin(alpha) / ld
+            curvature = 2.0 * math.sin(alpha) / ld
             steering_angle = math.atan(self.wheelbase * curvature)
             steering_wheel_angle = self.front2steer(math.degrees(steering_angle))
 
@@ -308,7 +395,9 @@ class PurePursuit(Node):
             self.global_cmd.enable = True
             self.global_pub.publish(self.global_cmd)
 
-            self.get_logger().info(f"Pos: ({curr_x:.2f}, {curr_y:.2f}), Target: ({target_x:.2f}, {target_y:.2f}), Speed: {self.speed:.2f}, Throttle: {throttle_cmd:.2f}, Steering: {steering_wheel_angle:.2f}")
+            self.publish_visualization_markers(target_x, target_y, ld)
+            self.get_logger().info(f"Pos: ({curr_x:.2f}, {curr_y:.2f}), Target: ({target_x:.2f}, {target_y:.2f}), yaw: {math.degrees(curr_yaw):.2f}, Steer Cmd: {steering_wheel_angle:.2f} deg, Speed: {self.speed:.2f} m/s, Throttle Cmd: {throttle_cmd:.2f} m/s²")
+            
 
 def main(args=None):
     rclpy.init(args=args)

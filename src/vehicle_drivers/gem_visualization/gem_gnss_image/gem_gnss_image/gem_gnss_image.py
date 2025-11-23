@@ -7,6 +7,8 @@ import csv
 import math
 import numpy as np
 from numpy import linalg as la
+import pymap3d as pm
+
 
 # ROS Headers
 import rclpy                                     
@@ -18,6 +20,7 @@ from std_msgs.msg import String, Float64
 from sensor_msgs.msg import Imu, NavSatFix, Image, CameraInfo           
 from sensor_msgs.msg import NavSatFix
 from septentrio_gnss_driver.msg import INSNavGeod
+from visualization_msgs.msg import Marker
 
 image_path = os.path.join(get_package_share_directory('gem_gnss_image'), 'images', 'gnss_map.png')
 
@@ -45,8 +48,16 @@ class GNSSImage(Node):
         self.gps_sub= self.create_subscription(NavSatFix, '/navsatfix', self.gps_callback, 1)
         self.ins_sub= self.create_subscription(INSNavGeod, '/insnavgeod', self.ins_callback, 1)
 
+        self.create_subscription(Marker, '/visualization/waypoints', self.waypoints_callback, 10)
+        self.create_subscription(Marker, '/visualization/next_waypoint', self.next_waypoint_callback, 10)
+        self.waypoints = []
+        self.next_waypoint = None
+
         self.lat_start_bt = 40.092722  # 40.09269  
         self.lon_start_l  = -88.236365 # -88.23628
+        self.origin_lat = 40.0927422
+        self.origin_lon = -88.2359639
+
         self.lat_scale    = 0.00057    # 0.00062  
         self.lon_scale    = 0.00136    # 0.00136   
 
@@ -85,6 +96,16 @@ class GNSSImage(Node):
 
         return lon_xd, lat_yd  
 
+    def waypoints_callback(self, msg):
+        self.waypoints = msg.points
+
+    def next_waypoint_callback(self, msg):
+        self.next_waypoint = msg.pose.position
+
+    def enu_to_geodetic(self, x, y, z=0.0):
+        lat, lon, alt = pm.enu2geodetic(x, y, z, self.origin_lat, self.origin_lon, 0.0)
+        return lat, lon, alt
+
     def timer_callback(self):    
 
         lon_x = int(self.img_width*(self.lon-self.lon_start_l)/self.lon_scale)
@@ -97,6 +118,24 @@ class GNSSImage(Node):
            lat_y >= 0 and lat_y <= self.img_height and lat_yd >= 0 and lat_yd <= self.img_height):
             cv2.arrowedLine(pub_image, (lon_x, lat_y), (lon_xd, lat_yd), (0, 0, 255), 2)
             cv2.circle(pub_image, (lon_x, lat_y), 12, (0,0,255), 2)
+        self.get_logger().info(f"GNSS Image: lat: {lat_y}, lon: {lon_x}, (lat,lon)=({lon_xd:.7f},{lat_yd:.7f})")
+
+        # draw waypoints
+        for wp in self.waypoints:
+            lat_w, lon_w, _ = self.enu_to_geodetic(wp.x, wp.y, 0.0)
+            pix_x = int(self.img_width * (lon_w - self.lon_start_l) / self.lon_scale)
+            pix_y = int(self.img_height - self.img_height * (lat_w - self.lat_start_bt) / self.lat_scale)
+            cv2.circle(pub_image, (pix_x, pix_y), 6, (255, 255, 255), -1)
+            if self.waypoints and (wp == self.waypoints[0] or wp == self.waypoints[1] or wp == self.waypoints[2]):
+                self.get_logger().info(f"Waypoint (pix): x: {pix_x}, y: {pix_y}  (lat,lon)=({lat_w:.7f},{lon_w:.7f})")
+
+        # draw next waypoint
+        if self.next_waypoint:
+            lat_n, lon_n, _ = self.enu_to_geodetic(self.next_waypoint.x, self.next_waypoint.y, 0.0)
+            nxt_x = int(self.img_width * (lon_n - self.lon_start_l) / self.lon_scale)
+            nxt_y = int(self.img_height - self.img_height * (lat_n - self.lat_start_bt) / self.lat_scale)
+            cv2.circle(pub_image, (nxt_x, nxt_y), 10, (0, 255, 0), -1)
+            self.get_logger().info(f"Next Waypoint: pix_x: {nxt_x}, pix_y: {nxt_y}  (lat,lon)=({lat_n:.7f},{lon_n:.7f})")
 
         try:
             # Convert OpenCV image to ROS image and publish

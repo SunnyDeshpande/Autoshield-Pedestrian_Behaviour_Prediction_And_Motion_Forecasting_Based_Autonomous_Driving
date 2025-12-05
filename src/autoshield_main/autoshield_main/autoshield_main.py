@@ -12,7 +12,6 @@ from rclpy.node import Node
 
 from std_msgs.msg import Bool
 
-
 from sensor_msgs.msg import NavSatFix, Imu
 from autoware_msgs.msg import Lane, Waypoint
 from autoware_msgs.msg import VehicleCmd

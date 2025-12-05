@@ -227,8 +227,8 @@ class StanleyController(Node):
         if abs(result) > 450:
             self.get_logger().error(f"Invalid steering wheel angle: {result}° - Clamping to ±450°")
             result = max(min(result, 450), -450)
+        return round(result, 2)
     
-    return round(result, 2)
     def check_joystick_enable(self):
         pygame.event.pump()
         try:
@@ -391,6 +391,34 @@ class StanleyController(Node):
 
             curr_x, curr_y, curr_yaw = self.get_gem_state()
             
+            # Find closest waypoint ahead of vehicle
+            min_dist = float('inf')
+            self.goal = 0
+            found_valid_waypoint = False
+            
+            for i in range(self.wp_size):
+                self.dist_arr[i] = self.dist(
+                    (self.path_points_x[i], self.path_points_y[i]), 
+                    (curr_x, curr_y)
+                )
+                dx = self.path_points_x[i] - curr_x
+                dy = self.path_points_y[i] - curr_y
+                angle_to_wp = math.atan2(dy, dx)
+                angle_diff = self.normalize_angle(angle_to_wp - curr_yaw)
+
+                if abs(angle_diff) < math.pi/2 and self.dist_arr[i] < min_dist:
+                    min_dist = self.dist_arr[i]
+                    self.goal = i
+                    found_valid_waypoint = True
+            
+            if not found_valid_waypoint:
+                self.get_logger().error("No valid waypoint ahead - Stopping")
+                self.brake_cmd.command = 0.5
+                self.accel_cmd.command = 0.0
+                self.brake_pub.publish(self.brake_cmd)
+                self.accel_pub.publish(self.accel_cmd)
+                return
+            
             target_x = self.path_points_x[self.goal]
             target_y = self.path_points_y[self.goal]
             path_yaw = self.heading_to_yaw(self.path_points_heading[self.goal])
@@ -412,9 +440,7 @@ class StanleyController(Node):
             throttle_cmd = self.pid_speed.get_control(now, speed_error)
             throttle_cmd = max(0.0, min(throttle_cmd, self.max_accel))
 
-            self.accel_#New Code Added Here 
-            #based on the orientation of the vehicle, find the closest waypoint in front of the vehicle
-            cmd.command = throttle_cmd
+            self.accel_cmd.command = throttle_cmd  
             self.brake_cmd.command = 0.0
             self.accel_pub.publish(self.accel_cmd)
             self.brake_pub.publish(self.brake_cmd)

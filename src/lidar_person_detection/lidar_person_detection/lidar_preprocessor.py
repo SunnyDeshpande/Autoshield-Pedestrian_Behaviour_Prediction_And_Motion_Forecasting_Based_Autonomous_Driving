@@ -47,7 +47,7 @@ class LidarObjectDetector(Node):
 
     def callback(self, msg: PointCloud2):
         try:
-            #  Preprocessing
+            #  loading point cloud
             raw_pts = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
             if isinstance(raw_pts, np.ndarray):
                 if raw_pts.size == 0:
@@ -149,7 +149,7 @@ class SimpleClusterTracker:
             if best_id is not None:
                 assignments.append(best_id)
                 used.add(best_id)
-                # EMA smoothing
+                # Exponential Moving Average smoothing
                 a = self.node.get_parameter('ema_alpha').value
                 self.tracks[best_id]['centroid'] = a * cent + (1 - a) * self.tracks[best_id]['centroid']
                 self.tracks[best_id]['hits'] += 1
@@ -261,11 +261,11 @@ class SimpleClusterTracker:
                 continue
             obj = DetectedObject()
             obj.id = tid
-            obj.center = Vector3(x=float(track['centroid'][0]),
-                                 y=float(track['centroid'][1]),
-                                 z=float(track['centroid'][2]))
+            obj.center = Vector3(x=float(-track['centroid'][0]), # Negate X
+                                 y=float(-track['centroid'][1]), # Negate Y
+                                 z=float(track['centroid'][2] + 2.0)) # offset height
             obj.point_count = len(cluster['points'])
-            dx, dy = track['centroid'][0], track['centroid'][1]
+            dx, dy = -track['centroid'][0], -track['centroid'][1]
             obj.distance = math.hypot(dx, dy)
             obj.angle_deg = math.degrees(math.atan2(dy, dx))
             arr.objects.append(obj)

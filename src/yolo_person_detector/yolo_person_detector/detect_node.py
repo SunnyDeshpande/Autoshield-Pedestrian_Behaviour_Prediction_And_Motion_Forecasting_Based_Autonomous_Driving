@@ -14,20 +14,18 @@ from cv_bridge import CvBridge
 from tf2_ros import TransformBroadcaster
 
 =======
+
 from sensor_msgs.msg import Image
-from vision_msgs.msg import (
-    Detection2DArray, Detection2D,
-    ObjectHypothesisWithPose, BoundingBox2D
-)
+from vision_msgs.msg import Detection2DArray, Detection2D, ObjectHypothesisWithPose, BoundingBox2D
 from visualization_msgs.msg import Marker
-from geometry_msgs.msg import Point, Pose, PoseStamped, TransformStamped
+from geometry_msgs.msg import Point, TransformStamped
+from std_msgs.msg import String
+
 from cv_bridge import CvBridge
 <<<<<<< HEAD
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
 =======
 from tf2_ros import TransformBroadcaster
-from tf2_ros.buffer import Buffer
-from tf2_ros.transform_listener import TransformListener
 
 >>>>>>> df95368 (improved person detection)
 import numpy as np
@@ -48,11 +46,18 @@ COCO_PERSON_CLASS_ID = 0
 =======
 COCO_PERSON_CLASS_ID = 0  # "person"
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
+COCO_PERSON_CLASS_ID = 0
 
 
 class YoloV11PersonDetector(Node):
     def __init__(self):
         super().__init__('yolo_v11_person_detector')
+
+        # ---------------- Parameters ----------------
+        self.declare_parameter('image_topic', '/oak/rgb/image_raw')
+        self.declare_parameter('depth_topic', '/oak/stereo/image_raw')
+        # Params
+        self.declare_parameter('image_topic', '/camera/color/image_raw')
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -65,6 +70,7 @@ class YoloV11PersonDetector(Node):
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
 =======
         # Parameters
+        # ---------------- Parameters ----------------
         self.declare_parameter('image_topic', '/oak/rgb/image_raw')
         self.declare_parameter('depth_topic', '/oak/stereo/image_raw')
 >>>>>>> df95368 (improved person detection)
@@ -98,17 +104,32 @@ class YoloV11PersonDetector(Node):
         self.declare_parameter('crossing_ax_threshold', 30.0)
 >>>>>>> df95368 (improved person detection)
 
+        self.declare_parameter('x_vel_buffer_length', 3)
+        self.declare_parameter('y_vel_buffer_length', 10)
+        self.declare_parameter('vehicle_speed', 0.5)
+        self.declare_parameter('min_safe_distance', 1.0)
+        self.declare_parameter('max_ped_speed_for_safety', 2.0)
+
         image_topic = self.get_parameter('image_topic').get_parameter_value().string_value
         self.depth_topic = self.get_parameter('depth_topic').get_parameter_value().string_value
         self.publish_debug = self.get_parameter('publish_debug_image').get_parameter_value().bool_value
         model_path = self.get_parameter('model_path').get_parameter_value().string_value
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
+
         self.conf = float(self.get_parameter('conf').value)
         self.iou = float(self.get_parameter('iou').value)
         self.device = self.get_parameter('device').get_parameter_value().string_value
         self.imgsz = int(self.get_parameter('imgsz').value)
         self.half = bool(self.get_parameter('half').value)
         self.max_det = int(self.get_parameter('max_detections').value)
+
+        self.x_vel_buffer_length = int(self.get_parameter('x_vel_buffer_length').value)
+        self.y_vel_buffer_length = int(self.get_parameter('y_vel_buffer_length').value)
+        self.vehicle_speed = float(self.get_parameter('vehicle_speed').value)
+        self.min_safe_distance = float(self.get_parameter('min_safe_distance').value)
+        self.max_ped_speed_for_safety = float(self.get_parameter('max_ped_speed_for_safety').value)
+
+        # ---------------- YOLO model ----------------
 <<<<<<< HEAD
 <<<<<<< HEAD
 
@@ -133,7 +154,7 @@ class YoloV11PersonDetector(Node):
 >>>>>>> df95368 (improved person detection)
 
         if YOLO is None:
-            raise RuntimeError("Ultralytics is not installed. pip install ultralytics")
+            raise RuntimeError("Ultralytics is not installed. `pip install ultralytics`")
 
         self.get_logger().info(f"Loading YOLOv11 model: {model_path}")
         self.model = YOLO(model_path)
@@ -154,6 +175,7 @@ class YoloV11PersonDetector(Node):
         # ---------------- ROS I/O ----------------
 =======
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
+        # ---------------- ROS I/O ----------------
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
@@ -162,6 +184,7 @@ class YoloV11PersonDetector(Node):
         self.bridge = CvBridge()
 <<<<<<< HEAD
 <<<<<<< HEAD
+
 
         self.sub_rgb = self.create_subscription(Image, image_topic, self.image_cb, qos)
         self.sub_depth = self.create_subscription(Image, self.depth_topic, self.depth_cb, qos)
@@ -173,17 +196,15 @@ class YoloV11PersonDetector(Node):
         self.sub_depth = self.create_subscription(Image, self.depth_topic, self.depth_cb, qos)
 >>>>>>> df95368 (improved person detection)
 
-        # TF listener for frame transforms
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
-
-        # Publishers
         self.pub_dets = self.create_publisher(Detection2DArray, 'detections', 10)
         self.pub_debug = self.create_publisher(Image, 'detections/image', 10) if self.publish_debug else None
+
         self.pub_marker = self.create_publisher(Marker, 'person_marker', 10)
         self.pub_path_marker = self.create_publisher(Marker, 'person_path', 10)
+        self.pub_prediction_marker = self.create_publisher(Marker, 'person_prediction', 10)
         self.pub_car_marker = self.create_publisher(Marker, 'car_marker', 10)
-        self.pub_person_pose = self.create_publisher(PoseStamped, 'person_pose', 10)
+
+        self.pub_vehicle_cmd = self.create_publisher(String, 'vehicle_control_command', 10)
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -735,68 +756,63 @@ class YoloV11PersonDetector(Node):
 =======
 =======
         # FPS measurement
+        self.tf_broadcaster = TransformBroadcaster(self)
+        self.publish_camera_transform()
+
+        # ---------------- State ----------------
         self.last_fps_t = time.time()
         self.frame_count = 0
 
-        # Depth frame storage
+        self.x_vel_buffer = []
+        self.y_vel_buffer = []
+        self.prev_boxes = []
+        self.prev_time = None
+        self.prev_corners_vel = None
         self.latest_depth = None
 >>>>>>> df95368 (improved person detection)
 
-        # Multi-person tracking
-        # track_id -> dict with keys:
-        #   cx, cy, z          (detection center in pixels + depth)
-        #   X, Y, Z            (3D position in camera frame, meters)
-        #   sx, sy, sz         (smoothed 3D position)
-        #   path_img: [(u,v)]
-        #   path_3d:  [(X,Y,Z)]
-        #   missed:   frames since last seen
-        #   vx, vy: velocity in meters/second
-        #   is_crossing: bool for crossing status
         self.tracks = {}
         self.next_track_id = 0
         self.max_path_len = 100
         self.max_missing_frames = 10
         self.smooth_alpha = 0.6
-
-        self.prev_boxes = []
-        self.prev_time = None
+        self.prediction_time = 5.0
+        self.prediction_points = 20
 
         self.get_logger().info("YOLOv11 person detector ready.")
 
+    # ------------------------------------------------------------------
+    # TF
+    # ------------------------------------------------------------------
+    def publish_camera_transform(self):
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'base_link'
+        t.child_frame_id = 'oak_rgb_camera_optical_frame'
+        t.transform.translation.x = 0.535
+        t.transform.translation.y = 0.0
+        t.transform.translation.z = 1.683
+        t.transform.rotation.x = 0.0
+        t.transform.rotation.y = 0.7071080798594738
+        t.transform.rotation.z = 0.0
+        t.transform.rotation.w = 0.7071054825112363
+        self.tf_broadcaster.sendTransform(t)
+
+    # ------------------------------------------------------------------
+    # Depth callback
+    # ------------------------------------------------------------------
     def depth_cb(self, msg: Image):
         try:
             depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-            self.latest_depth = depth_img.astype(np.float32) / 1000.0  # meters
+            self.latest_depth = depth_img.astype(np.float32) / 1000.0  # mm -> m
         except Exception as e:
             self.get_logger().warn(f"Depth conversion failed: {e}")
 
-    def _transform_point_to_frame(self, x, y, z, from_frame, to_frame, timestamp):
-        """Transform a 3D point from one frame to another."""
-        try:
-            transform = self.tf_buffer.lookup_transform(
-                to_frame, from_frame, timestamp,
-                timeout=rclpy.duration.Duration(seconds=0.1)
-            )
-            # Simple translation (ignoring rotation for now - camera frame to base_link)
-            tx = transform.transform.translation.x
-            ty = transform.transform.translation.y
-            tz = transform.transform.translation.z
-            
-            # For full rotation, would need quaternion math, but for initial visualization
-            # we'll just translate. Update this if rotation matters.
-            x_new = x + tx
-            y_new = y + ty
-            z_new = z + tz
-            
-            return x_new, y_new, z_new
-        except Exception as e:
-            # If transform fails, return original point
-            self.get_logger().warn(f"Transform lookup failed: {e}")
-            return x, y, z
-
+    # ------------------------------------------------------------------
+    # Geometry helpers
+    # ------------------------------------------------------------------
     @staticmethod
     def _point_in_triangle(px, py, x1, y1, x2, y2, x3, y3):
-        """Check if point (px, py) is inside triangle defined by three vertices."""
         denom = ((y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3))
         if abs(denom) < 1e-6:
             return False
@@ -808,8 +824,158 @@ class YoloV11PersonDetector(Node):
 <<<<<<< HEAD
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
 =======
+    @staticmethod
+    def _line_segment_intersection(p1, p2, p3, p4):
+        x1, y1 = p1
+        x2, y2 = p2
+        x3, y3 = p3
+        x4, y4 = p4
+        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(denom) < 1e-9:
+            return False, None
+        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+        u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
+        if 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0:
+            ix = x1 + t * (x2 - x1)
+            iy = y1 + t * (y2 - y1)
+            return True, (ix, iy)
+        return False, None
+
+    @staticmethod
+    def _path_intersects_line(path, line_start, line_end, threshold=0.2):
+        # Segment intersection first
+        for i in range(len(path) - 1):
+            intersects, point = YoloV11PersonDetector._line_segment_intersection(
+                path[i][:2], path[i + 1][:2], line_start, line_end
+            )
+            if intersects:
+                return True, point
+        # Distance of points to line
+        x1, y1 = line_start
+        x2, y2 = line_end
+        denom = np.sqrt((y2 - y1) ** 2 + (x2 - x1) ** 2) + 1e-9
+        for point in path:
+            px, py = point[0], point[1]
+            dist = abs((y2 - y1) * px - (x2 - x1) * py + x2 * y1 - y2 * x1) / denom
+            if dist < threshold:
+                return True, point
+        return False, None
+
+    # ------------------------------------------------------------------
+    # Path smoothing + prediction
+    # ------------------------------------------------------------------
+    def _smooth_path_and_predict(self, path_3d):
+        if len(path_3d) < 3:
+            return path_3d, []
+
+        path_array = np.array(path_3d)
+
+        # Spike removal
+        filtered_path = [path_array[0]]
+        spike_threshold = 0.5  # meters
+
+        for i in range(1, len(path_array) - 1):
+            prev_point = path_array[i - 1]
+            curr_point = path_array[i]
+            next_point = path_array[i + 1]
+            expected = (prev_point + next_point) / 2.0
+            deviation = np.linalg.norm(curr_point - expected)
+            if deviation > spike_threshold:
+                median_point = np.median([prev_point, curr_point, next_point], axis=0)
+                filtered_path.append(median_point)
+            else:
+                filtered_path.append(curr_point)
+
+        filtered_path.append(path_array[-1])
+        filtered_array = np.array(filtered_path)
+
+        # Moving average smoothing
+        window = min(7, len(filtered_array))
+        smoothed = []
+        for i in range(len(filtered_array)):
+            start_idx = max(0, i - window // 2)
+            end_idx = min(len(filtered_array), i + window // 2 + 1)
+            smoothed.append(np.mean(filtered_array[start_idx:end_idx], axis=0))
+
+        # Exponential smoothing
+        exponential_smoothed = [smoothed[0]]
+        alpha_exp = 0.3
+        for i in range(1, len(smoothed)):
+            new_point = alpha_exp * np.array(smoothed[i]) + (1 - alpha_exp) * np.array(exponential_smoothed[-1])
+            exponential_smoothed.append(new_point)
+
+        smoothed_path = exponential_smoothed
+        if len(smoothed_path) < 3:
+            return smoothed_path, []
+
+        # Velocity estimation from recent points
+        dt_per_frame = 0.033
+        recent_points = smoothed_path[-15:]
+        if len(recent_points) < 2:
+            return smoothed_path, []
+
+        velocities = []
+        for i in range(1, len(recent_points)):
+            vel = (np.array(recent_points[i]) - np.array(recent_points[i - 1])) / dt_per_frame
+            velocities.append(vel)
+
+        if len(velocities) == 0:
+            return smoothed_path, []
+
+        velocities_array = np.array(velocities)
+        mean_vel = np.mean(velocities_array, axis=0)
+        std_vel = np.std(velocities_array, axis=0) + 1e-6
+
+        filtered_velocities = []
+        for vel in velocities_array:
+            if np.all(np.abs(vel - mean_vel) < 2 * std_vel):
+                filtered_velocities.append(vel)
+
+        if len(filtered_velocities) > 0:
+            avg_velocity = np.mean(filtered_velocities, axis=0)
+        else:
+            avg_velocity = mean_vel
+
+        # Flatten vertical component (assume ground)
+        avg_velocity[0] = 0.0
+
+        # Clamp max speed
+        speed = np.linalg.norm(avg_velocity)
+        max_speed = 3.0
+        if speed > max_speed:
+            avg_velocity = avg_velocity * (max_speed / speed)
+
+        avg_acceleration = np.zeros(3)
+
+        last_pos = np.array(smoothed_path[-1])
+        predicted = []
+
+        ground_height = 0.0
+        ground_start_pos = last_pos.copy()
+        ground_start_pos[0] = ground_height
+
+        max_prediction_distance = 5.0
+        for i in range(1, self.prediction_points + 1):
+            t = (i / self.prediction_points) * self.prediction_time
+            pred_pos = ground_start_pos + avg_velocity * t + 0.5 * avg_acceleration * t * t
+            pred_pos[0] = ground_height
+
+            distance = np.linalg.norm(pred_pos - ground_start_pos)
+            if distance > max_prediction_distance:
+                direction = (pred_pos - ground_start_pos) / (distance + 1e-9)
+                pred_pos = ground_start_pos + direction * max_prediction_distance
+                pred_pos[0] = ground_height
+                predicted.append(tuple(pred_pos))
+                break
+
+            predicted.append(tuple(pred_pos))
+
+        return smoothed_path, predicted
+
+    # ------------------------------------------------------------------
+    # Tracking
+    # ------------------------------------------------------------------
     def _update_tracks(self, detections, img_w, img_h):
-        """Update tracks with new detections using greedy nearest neighbor association."""
         deleted_ids = []
         max_dist2 = 80.0 ** 2
         used_tracks = set()
@@ -817,11 +983,10 @@ class YoloV11PersonDetector(Node):
         for det in detections:
             cx, cy, z = det['cx'], det['cy'], det['z']
             X, Y, Z = det['X'], det['Y'], det['Z']
-            vx, vy = det['vx'], det['vy']
 
             best_id = None
             best_dist2 = max_dist2
-            
+
             for tid, tr in self.tracks.items():
                 dx = cx - tr['cx']
                 dy = cy - tr['cy']
@@ -835,21 +1000,14 @@ class YoloV11PersonDetector(Node):
                 tid = self.next_track_id
                 self.next_track_id += 1
                 self.tracks[tid] = {
-                    'cx': cx,
-                    'cy': cy,
-                    'z': z,
-                    'X': X,
-                    'Y': Y,
-                    'Z': Z,
-                    'sx': X,
-                    'sy': Y,
-                    'sz': Z,
+                    'cx': cx, 'cy': cy, 'z': z,
+                    'X': X, 'Y': Y, 'Z': Z,
+                    'sx': X, 'sy': Y, 'sz': Z,
                     'path_img': [(int(cx), int(cy))],
                     'path_3d': [(X, Y, Z)],
+                    'smoothed_path': [(X, Y, Z)],
+                    'predicted_path': [],
                     'missed': 0,
-                    'vx': vx,
-                    'vy': vy,
-                    'is_crossing': False,
                 }
                 used_tracks.add(tid)
             else:
@@ -861,8 +1019,6 @@ class YoloV11PersonDetector(Node):
                 tr['X'] = X
                 tr['Y'] = Y
                 tr['Z'] = Z
-                tr['vx'] = vx
-                tr['vy'] = vy
 
                 alpha = self.smooth_alpha
                 tr['sx'] = alpha * X + (1.0 - alpha) * tr['sx']
@@ -877,10 +1033,13 @@ class YoloV11PersonDetector(Node):
                 if len(tr['path_3d']) > self.max_path_len:
                     tr['path_3d'].pop(0)
 
+                smoothed, predicted = self._smooth_path_and_predict(tr['path_3d'])
+                tr['smoothed_path'] = smoothed
+                tr['predicted_path'] = predicted
                 tr['missed'] = 0
                 used_tracks.add(best_id)
 
-        # Mark unmatched tracks as missed
+        # Increment miss counters for unused tracks
         for tid in list(self.tracks.keys()):
             if tid not in used_tracks:
                 self.tracks[tid]['missed'] += 1
@@ -891,6 +1050,122 @@ class YoloV11PersonDetector(Node):
         return deleted_ids
 
 >>>>>>> df95368 (improved person detection)
+    # ------------------------------------------------------------------
+    # Pedestrian kinematics helpers
+    # ------------------------------------------------------------------
+    def _is_pedestrian_slowing_down(self, tr):
+        if len(tr['path_3d']) < 10:
+            return False
+        recent_path = tr['path_3d'][-10:]
+        velocities = []
+        dt = 0.033
+        for i in range(1, len(recent_path)):
+            vel = np.linalg.norm(np.array(recent_path[i]) - np.array(recent_path[i - 1])) / dt
+            velocities.append(vel)
+        if len(velocities) < 5:
+            return False
+        recent_vel = np.mean(velocities[-3:])
+        older_vel = np.mean(velocities[:3])
+        deceleration = older_vel - recent_vel
+        return deceleration > 0.1
+
+    def _get_pedestrian_velocity(self, tr):
+        if len(tr['path_3d']) < 2:
+            return 0.0
+        recent_path = tr['path_3d'][-5:]
+        velocities = []
+        dt = 0.033
+        for i in range(1, len(recent_path)):
+            vel = np.linalg.norm(np.array(recent_path[i]) - np.array(recent_path[i - 1])) / dt
+            velocities.append(vel)
+        return np.mean(velocities) if velocities else 0.0
+
+    def _compute_velocity_vector(self, tr):
+        if len(tr['path_3d']) < 3:
+            return np.array([0.0, 0.0, 0.0])
+        recent_path = np.array(tr['path_3d'][-3:])
+        dt = 0.033
+        vx = (recent_path[-1, 0] - recent_path[0, 0]) / (2 * dt)
+        vy = (recent_path[-1, 1] - recent_path[0, 1]) / (2 * dt)
+        vz = (recent_path[-1, 2] - recent_path[0, 2]) / (2 * dt)
+        return np.array([vx, vy, vz])
+
+    def _time_to_collision(self, predicted_path, ped_velocity_vector, vehicle_width=1.0, vehicle_length=2.0):
+        if len(predicted_path) < 2:
+            return float('inf'), float('inf'), None
+
+        vehicle_x_min = -vehicle_width / 2.0
+        vehicle_x_max = vehicle_width / 2.0
+        vehicle_y_min = 0.0
+        vehicle_y_max = vehicle_length
+
+        min_distance = float('inf')
+        collision_time = float('inf')
+        entry_point = None
+
+        for i, point in enumerate(predicted_path):
+            px, py, pz = point[0], point[1], point[2]
+
+            distance_to_vehicle = np.sqrt(
+                max(0, abs(px) - vehicle_width / 2.0) ** 2 +
+                max(0, max(0, vehicle_y_min - py), py - vehicle_y_max) ** 2
+            )
+
+            if distance_to_vehicle < min_distance:
+                min_distance = distance_to_vehicle
+                entry_point = point
+
+            in_x_zone = vehicle_x_min <= px <= vehicle_x_max
+            in_y_zone = vehicle_y_min <= py <= vehicle_y_max
+
+            if in_x_zone and in_y_zone:
+                t = i * 0.033
+                if t < collision_time:
+                    collision_time = t
+                    entry_point = point
+
+        if collision_time == float('inf') and min_distance < 0.5:
+            collision_time = min_distance / (np.linalg.norm(ped_velocity_vector) + 0.01)
+
+        return collision_time, min_distance, entry_point
+
+    def _get_closest_collision_pedestrian(self, collision_peds):
+        if not collision_peds:
+            return None
+        min_ttc = float('inf')
+        closest_ped = None
+        for tid, ped_data in collision_peds.items():
+            if ped_data['ttc'] < min_ttc:
+                min_ttc = ped_data['ttc']
+                closest_ped = tid
+        return closest_ped, collision_peds[closest_ped]
+
+    def _safety_filter(self, primary_cmd, collision_detected, ttc, ped_speed, ped_slowing):
+        if not collision_detected:
+            return "CONTINUE"
+
+        if ttc < 1.0:
+            safe_cmd = "STOP"
+            reason = f"TTC too short ({ttc:.2f}s)"
+        elif ped_speed > self.max_ped_speed_for_safety and not ped_slowing:
+            safe_cmd = "STOP"
+            reason = f"Pedestrian speed high ({ped_speed:.2f} m/s) and not slowing"
+        elif ped_slowing and ttc > 3.0:
+            safe_cmd = "CONTINUE_SLOW"
+            reason = f"Pedestrian slowing, TTC={ttc:.2f}s"
+        elif not ped_slowing and ttc < 3.0:
+            safe_cmd = "STOP"
+            reason = f"Pedestrian not slowing, TTC={ttc:.2f}s"
+        else:
+            safe_cmd = "CONTINUE_SLOW"
+            reason = "Default caution"
+
+        self.get_logger().info(f"Safety Filter: {primary_cmd} -> {safe_cmd} ({reason})")
+        return safe_cmd
+
+    # ------------------------------------------------------------------
+    # Main image callback
+    # ------------------------------------------------------------------
     def image_cb(self, msg: Image):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -899,6 +1174,8 @@ class YoloV11PersonDetector(Node):
 <<<<<<< HEAD
             self.get_logger().error(f"cv_bridge RGB failed: {e}")
             return
+
+        self.publish_camera_transform()
 
         self.publish_camera_transform()
 
@@ -938,9 +1215,14 @@ class YoloV11PersonDetector(Node):
         cy0 = h / 2.0
 >>>>>>> df95368 (improved person detection)
 
-        # Define crossing zone geometry (fan-shaped)
+        # Region geometry in image space
         x_center = int(w / 2)
+        x_left_third = int(w / 3)
+        x_right_third = int(2 * w / 3)
+        x_left_sixth = int(w / 6)
+        x_right_sixth = int(5 * w / 6)
         delta = int(w / 6)
+
         top_center = (x_center, 0)
         top_left_yellow = (x_center - delta, 0)
         top_right_yellow = (x_center + delta, 0)
@@ -955,6 +1237,8 @@ class YoloV11PersonDetector(Node):
 >>>>>>> df95368 (improved person detection)
         bottom_left_red = (x_left_third, h - 1)
         bottom_right_red = (x_right_third, h - 1)
+        bottom_left_yellow = (x_left_sixth, h - 1)
+        bottom_right_yellow = (x_right_sixth, h - 1)
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -984,6 +1268,7 @@ class YoloV11PersonDetector(Node):
         stamp = msg.header.stamp
         t_now = float(stamp.sec) + float(stamp.nanosec) * 1e-9
 >>>>>>> df95368 (improved person detection)
+
         dt = None
         if self.prev_time is not None:
             dt = t_now - self.prev_time
@@ -1001,10 +1286,12 @@ class YoloV11PersonDetector(Node):
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
 =======
         # YOLO inference
+        # ---------------- YOLO inference ----------------
         results = self.model.predict(cv_image, verbose=False, stream=False)
 >>>>>>> df95368 (improved person detection)
         det_msg = Detection2DArray()
         det_msg.header = msg.header
+
         r = results[0]
         curr_boxes = []
 <<<<<<< HEAD
@@ -1081,28 +1368,30 @@ class YoloV11PersonDetector(Node):
 >>>>>>> df95368 (improved person detection)
                 vx = 0.0
                 vy = 0.0
+                vx = vy = 0.0
+                ax = ay = 0.0
+                vel_candidates_scaled = None
 
-                # Calculate velocity from frame-to-frame motion
+                # Estimate velocity from box corner motion
                 if dt is not None and len(self.prev_boxes) > 0:
-                    prev_centers = [((px1 + px2) / 2.0, (py1 + py2) / 2.0)
-                                    for (px1, py1, px2, py2) in self.prev_boxes]
-                    dists = [(pcx - cx) ** 2 + (pcy - cy) ** 2
-                             for (pcx, pcy) in prev_centers]
+                    prev_centers = [((px1 + px2) / 2.0, (py1 + py2) / 2.0) for (px1, py1, px2, py2) in self.prev_boxes]
+                    dists = [(pcx - cx) ** 2 + (pcy - cy) ** 2 for (pcx, pcy) in prev_centers]
                     j = int(np.argmin(dists))
                     px1, py1, px2, py2 = self.prev_boxes[j]
 
                     prev_corners = [(px1, py1), (px2, py1), (px1, py2), (px2, py2)]
                     curr_corners = [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]
 
-                    vel_candidates_px = [((cx2 - cx1) / dt, (cy2 - cy1) / dt)
-                                         for (cx1, cy1), (cx2, cy2)
-                                         in zip(prev_corners, curr_corners)]
+                    vel_candidates_px = [
+                        ((cx2 - cx1) / dt, (cy2 - cy1) / dt)
+                        for (cx1, cy1), (cx2, cy2) in zip(prev_corners, curr_corners)
+                    ]
 
-                    # Scale pixels to meters (rough estimate based on person height)
+                    # crude m/px scaling
                     meters_per_pixel = 1.7 / max(bh, 1.0)
-                    vel_candidates_scaled = [(vx_c * meters_per_pixel, vy_c * meters_per_pixel)
-                                             for vx_c, vy_c in vel_candidates_px]
-
+                    vel_candidates_scaled = [
+                        (vx_c * meters_per_pixel, vy_c * meters_per_pixel) for vx_c, vy_c in vel_candidates_px
+                    ]
                     speeds = [vx_s ** 2 + vy_s ** 2 for (vx_s, vy_s) in vel_candidates_scaled]
                     min_v_idx = int(np.argmin(speeds))
                     vx, vy = vel_candidates_scaled[min_v_idx]
@@ -1165,9 +1454,34 @@ class YoloV11PersonDetector(Node):
 
 >>>>>>> ef80029 (added pedestrian detection and behavior prediction)
 =======
+                    # acceleration from previous velocities
+                    if self.prev_corners_vel is not None and len(self.prev_corners_vel) == 4:
+                        accel_speeds = []
+                        accel_candidates = []
+                        for (vx_c, vy_c), (vx_prev, vy_prev) in zip(vel_candidates_scaled, self.prev_corners_vel):
+                            ax_c = (vx_c - vx_prev) / dt
+                            ay_c = (vy_c - vy_prev) / dt
+                            accel_candidates.append((ax_c, ay_c))
+                            accel_speeds.append(ax_c ** 2 + ay_c ** 2)
+                        min_a_idx = int(np.argmin(accel_speeds))
+                        ax, ay = accel_candidates[min_a_idx]
+
+                if vel_candidates_scaled is not None:
+                    self.prev_corners_vel = vel_candidates_scaled
+                else:
+                    self.prev_corners_vel = None
+
                 curr_boxes.append((x1, y1, x2, y2))
 
-                # Create Detection2D message
+                # Velocity buffers
+                self.x_vel_buffer.append(vx)
+                self.y_vel_buffer.append(vy)
+                if len(self.x_vel_buffer) > self.x_vel_buffer_length:
+                    self.x_vel_buffer.pop(0)
+                if len(self.y_vel_buffer) > self.y_vel_buffer_length:
+                    self.y_vel_buffer.pop(0)
+
+                # Detection2D for vision_msgs
                 det = Detection2D()
                 det.header = msg.header
 >>>>>>> df95368 (improved person detection)
@@ -1176,6 +1490,7 @@ class YoloV11PersonDetector(Node):
                 det.bbox.center.position.y = float(cy)
                 det.bbox.size_x = float(bw)
                 det.bbox.size_y = float(bh)
+
                 hyp = ObjectHypothesisWithPose()
                 hyp.hypothesis.class_id = "person"
                 hyp.hypothesis.score = float(score)
@@ -1223,34 +1538,34 @@ class YoloV11PersonDetector(Node):
 >>>>>>> df95368 (improved person detection)
                 det_msg.detections.append(det)
 
-                # Get depth for 3D position
+                # Depth projection to 3D
                 z = 0.0
                 if self.latest_depth is not None:
                     xi = int(np.clip(cx, 0, self.latest_depth.shape[1] - 1))
                     yi = int(np.clip(cy, 0, self.latest_depth.shape[0] - 1))
                     z = float(self.latest_depth[yi, xi])
+                if z <= 0.0:
+                    z = 0.0
 
-                if z <= 0.0 or np.isnan(z):
-                    z = 2.0  # Default fallback distance
-                
-                # Clamp to reasonable depth range (10cm to 10m)
-                z = np.clip(z, 0.1, 10.0)
+                X_optical = (cx - cx0) * z / fx
+                Y_optical = (cy - cy0) * z / fy
+                Z_optical = z
 
-                # Back-project to 3D (camera frame)
-                X = (cx - cx0) * z / fx
-                Y = (cy - cy0) * z / fy
-                Z = z
+                # optical -> base (simple re-map; you can fix with real extrinsics)
+                X = Y_optical
+                Y = -X_optical
+                Z = Z_optical
 
-                detections_for_tracks.append({
-                    'cx': cx, 'cy': cy, 'z': z, 'X': X, 'Y': Y, 'Z': Z,
-                    'vx': vx, 'vy': vy, 'bh': bh, 'score': score
-                })
+                # Force ground-projected X if desired
+                X = 0.0
 
-                # Debug overlay
+                detections_for_tracks.append({'cx': cx, 'cy': cy, 'z': z, 'X': X, 'Y': Y, 'Z': Z})
+
+                # Draw debug
                 if debug_img is not None:
                     p1 = (int(x1), int(y1))
                     p2 = (int(x2), int(y2))
-                    color = (0, 165, 255)  # Orange = caution
+                    color = (0, 255, 0)
                     crossing = False
 
 <<<<<<< HEAD
@@ -1304,6 +1619,25 @@ class YoloV11PersonDetector(Node):
                     if in_zone and vy < self.crossing_vy_threshold:
                         crossing = True
                         color = (0, 0, 255)  # Red = crossing detected
+                    # crude "crossing" heuristic based on region + velocity orientation
+                    if abs(ax) < 30.0:
+                        in_left = self._point_in_triangle(
+                            cx, cy,
+                            bottom_left_red[0], bottom_left_red[1],
+                            top_center[0], top_center[1],
+                            top_left_yellow[0], top_left_yellow[1]
+                        )
+                        in_right = self._point_in_triangle(
+                            cx, cy,
+                            bottom_right_red[0], bottom_right_red[1],
+                            top_center[0], top_center[1],
+                            top_right_yellow[0], top_right_yellow[1]
+                        )
+                        if (in_left or in_right) and abs(vy / (vx + 1e-6)) < 0.5:
+                            crossing = True
+                            color = (0, 0, 255)
+                        else:
+                            color = (0, 165, 255)
 
                     cv2.rectangle(debug_img, p1, p2, color, 2)
 <<<<<<< HEAD
@@ -1370,17 +1704,19 @@ class YoloV11PersonDetector(Node):
 >>>>>>> df95368 (improved person detection)
                     if crossing:
                         label += " | CROSSING!"
+                    label = f"person {score:.2f}, {'CROSSING' if crossing else 'CAUTION'}"
                     cv2.putText(
-                        debug_img, label,
+                        debug_img,
+                        label,
                         (p1[0], max(0, p1[1] - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 0),
+                        2,
                     )
 
         self.prev_boxes = curr_boxes
         self.prev_time = t_now
-
-        # Publish detections
-        self.pub_dets.publish(det_msg)
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -1392,21 +1728,23 @@ class YoloV11PersonDetector(Node):
         # Update tracks
         deleted_ids = self._update_tracks(detections_for_tracks, w, h)
 
-        # Draw crossing zone on debug image
+        # Draw debug regions and paths
         if debug_img is not None:
             cv2.line(debug_img, bottom_left_red, top_center, (0, 0, 255), 2)
             cv2.line(debug_img, bottom_right_red, top_center, (0, 0, 255), 2)
-            cv2.line(debug_img, bottom_left_red, top_left_yellow, (255, 255, 0), 1)
-            cv2.line(debug_img, bottom_right_red, top_right_yellow, (255, 255, 0), 1)
+            cv2.line(debug_img, bottom_left_yellow, top_left_yellow, (0, 255, 255), 2)
+            cv2.line(debug_img, bottom_right_yellow, top_right_yellow, (0, 255, 255), 2)
 
-            # Draw tracked paths
             for tid, tr in self.tracks.items():
                 if len(tr['path_img']) > 1:
                     pts = np.array(tr['path_img'], dtype=np.int32).reshape(-1, 1, 2)
-                    color = [(255, 0, 255), (0, 255, 255), (0, 128, 255), (255, 255, 0)][tid % 4]
+                    color_table = [(255, 0, 255), (0, 255, 255), (0, 128, 255), (255, 255, 0)]
+                    color = color_table[tid % 4]
                     cv2.polylines(debug_img, [pts], isClosed=False, color=color, thickness=2)
 
 >>>>>>> df95368 (improved person detection)
+        # Publish detections & debug image
+        self.pub_dets.publish(det_msg)
         if debug_img is not None and self.pub_debug is not None:
             out_msg = self.bridge.cv2_to_imgmsg(debug_img, encoding='bgr8')
             out_msg.header = msg.header
@@ -1425,9 +1763,16 @@ class YoloV11PersonDetector(Node):
             ]:
 =======
         # Publish RViz markers and person poses
+        # Delete markers for dead tracks
         for tid in deleted_ids:
             for ns, pub in [("person", self.pub_marker), ("person_path", self.pub_path_marker)]:
 >>>>>>> df95368 (improved person detection)
+            for ns, pub in [
+                ("person", self.pub_marker),
+                ("person_path", self.pub_path_marker),
+                ("person_prediction", self.pub_prediction_marker),
+                ("person_prediction_end", self.pub_prediction_marker),
+            ]:
                 m = Marker()
                 m.header.frame_id = msg.header.frame_id
                 m.header.stamp = msg.header.stamp
@@ -1505,6 +1850,64 @@ class YoloV11PersonDetector(Node):
             # Person position
 =======
         # Publish markers and poses for active tracks
+        # ------------------------------------------------------------------
+        # Collision checking + safety logic
+        # ------------------------------------------------------------------
+        vehicle_start = (0.0, 0.0)
+        vehicle_end = (0.0, 5.0)
+
+        collision_peds = {}
+        for tid, tr in self.tracks.items():
+            if 'predicted_path' in tr and len(tr['predicted_path']) > 0:
+                intersects, point = self._path_intersects_line(
+                    tr['predicted_path'],
+                    vehicle_start,
+                    vehicle_end,
+                    threshold=0.3,
+                )
+                if intersects:
+                    ped_speed = self._get_pedestrian_velocity(tr)
+                    ped_vel_vector = self._compute_velocity_vector(tr)
+                    ttc, min_dist, entry_pt = self._time_to_collision(
+                        tr['predicted_path'],
+                        ped_vel_vector,
+                        vehicle_width=1.0,
+                        vehicle_length=2.0,
+                    )
+                    pedestrian_slowing = self._is_pedestrian_slowing_down(tr)
+
+                    collision_peds[tid] = {
+                        'speed': ped_speed,
+                        'ttc': ttc,
+                        'slowing': pedestrian_slowing,
+                        'track': tr,
+                        'min_distance': min_dist,
+                        'entry_point': entry_pt,
+                    }
+
+        if collision_peds:
+            closest_tid, closest_ped = self._get_closest_collision_pedestrian(collision_peds)
+            primary_cmd = "CONTINUE_SLOW" if closest_ped['slowing'] else "STOP"
+            final_cmd = self._safety_filter(
+                primary_cmd,
+                True,
+                closest_ped['ttc'],
+                closest_ped['speed'],
+                closest_ped['slowing'],
+            )
+            self.get_logger().warn(
+                f"Collision risk: {len(collision_peds)} pedestrians, closest TTC={closest_ped['ttc']:.2f}s"
+            )
+        else:
+            final_cmd = "CONTINUE"
+
+        cmd_msg = String()
+        cmd_msg.data = final_cmd
+        self.pub_vehicle_cmd.publish(cmd_msg)
+
+        # ------------------------------------------------------------------
+        # Visualization markers
+        # ------------------------------------------------------------------
         for tid, tr in self.tracks.items():
             sx, sy, sz = tr['sx'], tr['sy'], tr['sz']
 
@@ -1526,6 +1929,7 @@ class YoloV11PersonDetector(Node):
 
             # Person sphere marker
 >>>>>>> df95368 (improved person detection)
+            # Person position
             m = Marker()
             m.header.frame_id = msg.header.frame_id
             m.header.stamp = msg.header.stamp
@@ -1542,6 +1946,9 @@ class YoloV11PersonDetector(Node):
             m.pose.position.y = float(sy)
             m.pose.position.z = float(sz)
 >>>>>>> df95368 (improved person detection)
+            m.pose.position.x = sx
+            m.pose.position.y = sy
+            m.pose.position.z = sz
             m.pose.orientation.x = 0.0
             m.pose.orientation.y = 0.0
             m.pose.orientation.z = 0.0
@@ -1558,15 +1965,9 @@ class YoloV11PersonDetector(Node):
 
             # Smoothed path
 =======
+            m.color.r = 0.0
+            m.color.g = 1.0
             m.color.b = 0.0
-            
-            if tr['is_crossing']:
-                m.color.r = 1.0  # Red for crossing
-                m.color.g = 0.0
-            else:
-                m.color.r = 0.0
-                m.color.g = 1.0  # Green for normal
-            
             self.pub_marker.publish(m)
             
             if tid == 0:  # Debug log for first track
@@ -1574,6 +1975,8 @@ class YoloV11PersonDetector(Node):
 
             # Path marker (LINE_STRIP) – smoothed 3D path
 >>>>>>> df95368 (improved person detection)
+
+            # Smoothed path
             path = Marker()
             path.header.frame_id = msg.header.frame_id
             path.header.stamp = msg.header.stamp
@@ -1663,25 +2066,80 @@ class YoloV11PersonDetector(Node):
 =======
             path.points = [Point(x=float(px), y=float(py), z=float(pz))
                           for (px, py, pz) in tr['path_3d']]
+
+            if 'smoothed_path' in tr and len(tr['smoothed_path']) > 0:
+                path.points = [
+                    Point(x=float(px), y=float(py), z=float(pz))
+                    for (px, py, pz) in tr['smoothed_path']
+                ]
+            else:
+                path.points = [
+                    Point(x=float(px), y=float(py), z=float(pz))
+                    for (px, py, pz) in tr['path_3d']
+                ]
             self.pub_path_marker.publish(path)
 
-            # Publish person pose (position relative to camera/car frame)
-            pose_msg = PoseStamped()
-            pose_msg.header.frame_id = msg.header.frame_id
-            pose_msg.header.stamp = msg.header.stamp
-            pose_msg.pose.position.x = sx
-            pose_msg.pose.position.y = sy
-            pose_msg.pose.position.z = sz
-            pose_msg.pose.orientation.x = 0.0
-            pose_msg.pose.orientation.y = 0.0
-            pose_msg.pose.orientation.z = 0.0
-            pose_msg.pose.orientation.w = 1.0
-            self.pub_person_pose.publish(pose_msg)
+            # Predicted path
+            if 'predicted_path' in tr and len(tr['predicted_path']) > 0:
+                pred = Marker()
+                pred.header.frame_id = msg.header.frame_id
+                pred.header.stamp = msg.header.stamp
+                pred.ns = "person_prediction"
+                pred.id = tid
+                pred.type = Marker.LINE_STRIP
+                pred.action = Marker.ADD
+                pred.pose.position.x = 0.0
+                pred.pose.position.y = 0.0
+                pred.pose.position.z = 0.0
+                pred.pose.orientation.x = 0.0
+                pred.pose.orientation.y = 0.0
+                pred.pose.orientation.z = 0.0
+                pred.pose.orientation.w = 1.0
+                pred.scale.x = 0.15
+                pred.color.a = 1.0
+                pred.color.r = 1.0
+                pred.color.g = 0.0
+                pred.color.b = 0.0
+                pred.lifetime.sec = 0
+                pred.lifetime.nanosec = 0
+                pred.points = [
+                    Point(x=float(px), y=float(py), z=float(pz))
+                    for (px, py, pz) in tr['predicted_path']
+                ]
+                self.pub_prediction_marker.publish(pred)
 
-        # Car reference marker at origin of base_link
+                # Prediction end marker
+                end_marker = Marker()
+                end_marker.header.frame_id = msg.header.frame_id
+                end_marker.header.stamp = msg.header.stamp
+                end_marker.ns = "person_prediction_end"
+                end_marker.id = tid
+                end_marker.type = Marker.SPHERE
+                end_marker.action = Marker.ADD
+                end_pos = tr['predicted_path'][-1]
+                end_marker.pose.position.x = float(end_pos[0])
+                end_marker.pose.position.y = float(end_pos[1])
+                end_marker.pose.position.z = float(end_pos[2])
+                end_marker.pose.orientation.x = 0.0
+                end_marker.pose.orientation.y = 0.0
+                end_marker.pose.orientation.z = 0.0
+                end_marker.pose.orientation.w = 1.0
+                end_marker.scale.x = 0.4
+                end_marker.scale.y = 0.4
+                end_marker.scale.z = 0.4
+                end_marker.color.a = 1.0
+                end_marker.color.r = 1.0
+                end_marker.color.g = 0.3
+                end_marker.color.b = 0.0
+                end_marker.lifetime.sec = 0
+                end_marker.lifetime.nanosec = 0
+                self.pub_prediction_marker.publish(end_marker)
+
+        # Car marker at origin
         car = Marker()
         car.header.frame_id = 'base_link'
 >>>>>>> df95368 (improved person detection)
+        car.header.frame_id = msg.header.frame_id
         car.header.stamp = msg.header.stamp
         car.ns = "car"
         car.id = 0
@@ -1700,6 +2158,8 @@ class YoloV11PersonDetector(Node):
         car.color.g = 0.0
 =======
 >>>>>>> df95368 (improved person detection)
+        car.color.r = 0.0
+        car.color.g = 0.0
         car.color.b = 1.0
         self.pub_car_marker.publish(car)
 
@@ -1717,8 +2177,7 @@ class YoloV11PersonDetector(Node):
             now_t = time.time()
             fps = 30.0 / (now_t - self.last_fps_t + 1e-9)
             self.last_fps_t = now_t
-            num_crossing = sum(1 for tr in self.tracks.values() if tr['is_crossing'])
-            self.get_logger().info(f"~{fps:.1f} FPS | {len(self.tracks)} tracks | {num_crossing} crossing")
+            self.get_logger().info(f"~{fps:.1f} FPS")
 
 
 <<<<<<< HEAD
@@ -1765,3 +2224,4 @@ if __name__ == '__main__':
 if __name__ == "__main__":
     main()
 >>>>>>> df95368 (improved person detection)
+

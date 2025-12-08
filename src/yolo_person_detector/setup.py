@@ -27,7 +27,7 @@ setup(
             'yolo_person_detect = yolo_person_detector.detect_node:main',
             'video_publisher = yolo_person_detector.video_publisher:main',
             'rgbd_pedestrain_detector = yolo_person_detector.rgbd_pedestrain_detector:main',
-            'pedestrian_behaviour_predictor = pedestrian_behaviour_predictor:main'.
+            'pedestrian_behaviour_predictor = pedestrian_behaviour_predictor:main',
         ],
     },
 )

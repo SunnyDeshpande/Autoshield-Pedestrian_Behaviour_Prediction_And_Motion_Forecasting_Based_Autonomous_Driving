@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 
 import rclpy
@@ -10,7 +9,7 @@ from geometry_msgs.msg import Vector3
 import numpy as np
 import open3d as o3d
 import sensor_msgs_py.point_cloud2 as pc2
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Int32
 import colorsys
 import math
 
@@ -36,32 +35,54 @@ class LidarObjectDetector(Node):
         self.declare_parameter('track_min_hits', 0)
         self.declare_parameter('ema_alpha', 0.0)
 
+        # HUMAN & MOTION PARAMS
+        self.declare_parameter('human_height_min', 0.0)  
+        self.declare_parameter('human_height_max', 0.0)
+        self.declare_parameter('human_width_max', 0.0)   
+        self.declare_parameter('human_depth_max', 0.0)   
+        self.declare_parameter('human_ratio_min', 0.0)   
+        self.declare_parameter('human_footprint_max', 0.0) 
+        self.declare_parameter('human_volume_min', 0.0) 
+        self.declare_parameter('human_volume_max', 0.0)
+        self.declare_parameter('human_compactness_max', 0.0)
+        self.declare_parameter('human_xy_flatness_min', 0.0) 
+        self.declare_parameter('min_motion_threshold', 0.0) 
+        self.declare_parameter('static_check_frames', 0)
+        self.declare_parameter('max_intensity_avg', 0.0)
+
         self.sub = self.create_subscription(PointCloud2, '/ouster/points', self.callback, 10)
         self.pub_processed = self.create_publisher(PointCloud2, '/processed_points', 10)
         self.pub_clustered = self.create_publisher(PointCloud2, '/clustered_points', 10)
         self.pub_markers = self.create_publisher(MarkerArray, '/cluster_markers', 10)
         self.pub_objects = self.create_publisher(DetectedObjectArray, '/detected_objects', 10)
 
+        self.pub_person_dist = self.create_publisher(Int32, '/lidar_person_distance', 10)
+        self.pub_person_dir = self.create_publisher(Int32, '/lidar_person_direction', 10)
+        self.pub_human_debug = self.create_publisher(MarkerArray, '/human_debug_info', 10)
+
         self.tracker = SimpleClusterTracker(self)
-        self.get_logger().info("Lidar Object Detector with Tracking STARTED")
+        self.get_logger().info("Lidar Object Detector with Human Tracking STARTED")
 
     def callback(self, msg: PointCloud2):
         try:
-            #  loading point cloud
-            raw_pts = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
-            if isinstance(raw_pts, np.ndarray):
-                if raw_pts.size == 0:
-                    return
-                if raw_pts.dtype.names is not None:
-                    points_np = np.vstack([raw_pts[name] for name in ('x', 'y', 'z')]).T.astype(np.float64)
-                else:
-                    points_np = raw_pts.astype(np.float64).reshape(-1, 3)
-            else:
-                pts_list = list(raw_pts)
-                if len(pts_list) == 0:
-                    return
-                points_np = np.array(pts_list, dtype=np.float64)
+            # loading point cloud
+            field_names = [f.name for f in msg.fields]
+            has_intensity = 'intensity' in field_names
+            read_fields = ('x', 'y', 'z', 'intensity') if has_intensity else ('x', 'y', 'z')
+            
+            cloud_gen = pc2.read_points(msg, field_names=read_fields, skip_nans=True)
+            pts_list = list(cloud_gen)
+            if not pts_list: return
 
+            pts_array = np.array(pts_list)
+            
+            if pts_array.dtype.names:
+                x = pts_array['x']
+                y = pts_array['y']
+                z = pts_array['z']
+                points_np = np.column_stack((x, y, z)).astype(np.float64)
+            else:
+                points_np = pts_array[:, 0:3].astype(np.float64)
 
             pcd = o3d.geometry.PointCloud()
             pcd.points = o3d.utility.Vector3dVector(points_np)
@@ -78,15 +99,19 @@ class LidarObjectDetector(Node):
             pcd = pcd.voxel_down_sample(self.get_parameter('voxel_size').value)
 
             # Statistical Outlier Removal
-            _, ind = pcd.remove_statistical_outlier(
-                nb_neighbors=self.get_parameter('sor_nb_neighbors').value,
-                std_ratio=self.get_parameter('sor_std_ratio').value
-            )
-            pcd = pcd.select_by_index(ind)
+            try:
+                if len(pcd.points) > self.get_parameter('sor_nb_neighbors').value:
+                    _, ind = pcd.remove_statistical_outlier(
+                        nb_neighbors=self.get_parameter('sor_nb_neighbors').value,
+                        std_ratio=self.get_parameter('sor_std_ratio').value
+                    )
+                    pcd = pcd.select_by_index(ind)
+            except: pass
 
             # Ground Removal
             points = np.asarray(pcd.points)
-            points = points[points[:, 2] > self.get_parameter('ground_z_threshold').value]
+            if len(points) > 0:
+                points = points[points[:, 2] > self.get_parameter('ground_z_threshold').value]
             if len(points) < 10: return
 
             # Publish processed point cloud
@@ -100,18 +125,25 @@ class LidarObjectDetector(Node):
             self.tracker.update(clusters, header)
 
         except Exception as e:
-            self.get_logger().error(f"Error: {e}", throttle_duration_sec=5)
+            self.get_logger().error(f"Error: {e}")
 
     def cluster_with_dbscan(self, pcd):
         eps = self.get_parameter('dbscan_eps').value
         min_pts = self.get_parameter('dbscan_min_points').value
+        
+        if len(pcd.points) < min_pts: return []
+
         with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Error):
             labels = np.array(pcd.cluster_dbscan(eps=eps, min_points=min_pts, print_progress=False))
 
         clusters = []
+        if len(labels) == 0: return clusters
+
+        points_np = np.asarray(pcd.points)
         for label in np.unique(labels):
             if label == -1: continue
-            pts = np.asarray(pcd.points)[labels == label]
+            mask = (labels == label)
+            pts = points_np[mask]
             if len(pts) < min_pts: continue
             clusters.append({'points': pts, 'centroid': pts.mean(axis=0)})
         return clusters
@@ -123,6 +155,7 @@ class SimpleClusterTracker:
         self.tracks = {}
         self.next_id = 0
         self.colors = {}
+        self.locked_human_id = None 
 
     def get_color(self, tid):
         if tid not in self.colors:
@@ -154,9 +187,23 @@ class SimpleClusterTracker:
                 self.tracks[best_id]['centroid'] = a * cent + (1 - a) * self.tracks[best_id]['centroid']
                 self.tracks[best_id]['hits'] += 1
                 self.tracks[best_id]['age'] = 0
+                self.tracks[best_id]['points'] = clusters[len(assignments)-1]['points']
+                start_pos = self.tracks[best_id].get('start_pos', self.tracks[best_id]['centroid'])
+                self.tracks[best_id]['start_pos'] = start_pos
+                self.tracks[best_id]['displacement'] = np.linalg.norm(start_pos - self.tracks[best_id]['centroid'])
+                self.tracks[best_id]['total_frames'] = self.tracks[best_id].get('total_frames', 0) + 1
+
             else:
                 assignments.append(self.next_id)
-                self.tracks[self.next_id] = {'centroid': cent.copy(), 'hits': 1, 'age': 0}
+                self.tracks[self.next_id] = {
+                    'centroid': cent.copy(), 
+                    'hits': 1, 
+                    'age': 0,
+                    'start_pos': cent.copy(),
+                    'displacement': 0.0,
+                    'total_frames': 1,
+                    'points': clusters[len(assignments)-1]['points']
+                }
                 self.next_id += 1
 
         # Age management
@@ -165,9 +212,12 @@ class SimpleClusterTracker:
                 self.tracks[tid]['age'] += 1
                 if self.tracks[tid]['age'] > self.node.get_parameter('track_max_age').value:
                     del self.tracks[tid]
+                    if tid == self.locked_human_id:
+                        self.locked_human_id = None
 
         self.publish_visualization(assignments, clusters, header)
         self.publish_detected_objects(assignments, clusters, header)
+        self.filter_and_publish_human(header)
 
     def publish_visualization(self, assignments, clusters, header):
         marker_array = MarkerArray()
@@ -270,6 +320,134 @@ class SimpleClusterTracker:
             obj.angle_deg = math.degrees(math.atan2(dy, dx))
             arr.objects.append(obj)
         self.node.pub_objects.publish(arr)
+
+    # Human Detection and Filtering
+    def filter_and_publish_human(self, header):
+        h_min = self.node.get_parameter('human_height_min').value
+        h_max = self.node.get_parameter('human_height_max').value
+        w_max = self.node.get_parameter('human_width_max').value
+        d_max = self.node.get_parameter('human_depth_max').value
+        ratio_min = self.node.get_parameter('human_ratio_min').value
+        footprint_max = self.node.get_parameter('human_footprint_max').value
+        vol_min = self.node.get_parameter('human_volume_min').value
+        vol_max = self.node.get_parameter('human_volume_max').value
+        compact_max = self.node.get_parameter('human_compactness_max').value
+        flatness_min = self.node.get_parameter('human_xy_flatness_min').value
+        
+        min_motion = self.node.get_parameter('min_motion_threshold').value
+        static_frames = self.node.get_parameter('static_check_frames').value
+        
+        min_hits = self.node.get_parameter('track_min_hits').value
+
+        candidates = [] 
+
+        for tid, track in self.tracks.items():
+            if track['hits'] < min_hits: continue
+            if track['total_frames'] > static_frames:
+                if track['displacement'] < min_motion:
+                    continue # REJECT STATIC
+
+            pts = track['points']
+            if len(pts) < 5: continue
+
+            # Geometric Checks
+            min_pt = pts.min(axis=0)
+            max_pt = pts.max(axis=0)
+            dims = max_pt - min_pt
+            dx, dy, dz = dims[0], dims[1], dims[2]
+            
+            xy_extent = max(dx, dy)
+            xy_min = min(dx, dy)
+            footprint = dx * dy
+            volume = dx * dy * dz
+            aspect_ratio = dz / xy_extent if xy_extent > 0 else 0
+            
+            if not (h_min < dz < h_max): continue
+            if (dx > d_max) or (dy > w_max): continue
+            if aspect_ratio < ratio_min: continue
+            if footprint > footprint_max: continue
+            if not (vol_min < volume < vol_max): continue
+            if xy_extent > 0 and (xy_min / xy_extent) < flatness_min: continue
+
+            z_bins = np.linspace(min_pt[2], max_pt[2], 4)
+            hist, _ = np.histogram(pts[:, 2], bins=z_bins)
+            if np.count_nonzero(hist) < 2: continue 
+
+            centroid_xy = track['centroid'][:2]
+            dists_to_center = np.linalg.norm(pts[:, :2] - centroid_xy, axis=1)
+            if np.mean(dists_to_center) > compact_max: continue
+
+            dist = math.hypot(track['centroid'][0], track['centroid'][1])
+            candidates.append({'dist': dist, 'id': tid, 'track': track})
+
+        selected_track = None
+        candidates.sort(key=lambda x: x['dist'])
+
+        if not candidates:
+            self.locked_human_id = None
+        else:
+            best_candidate = candidates[0]
+            if self.locked_human_id is None:
+                selected_track = best_candidate['track']
+                self.locked_human_id = best_candidate['id']
+            else:
+                locked_candidate = next((c for c in candidates if c['id'] == self.locked_human_id), None)
+                if locked_candidate:
+                    if best_candidate['dist'] < (locked_candidate['dist'] - 1.5):
+                        selected_track = best_candidate['track']
+                        self.locked_human_id = best_candidate['id']
+                    else:
+                        selected_track = locked_candidate['track']
+                else:
+                    selected_track = best_candidate['track']
+                    self.locked_human_id = best_candidate['id']
+
+        marker_array = MarkerArray()
+        
+        if selected_track:
+            cx, cy = selected_track['centroid'][0], selected_track['centroid'][1]
+            cz = selected_track['centroid'][2]
+            dist_val = int(math.hypot(cx, cy))
+            
+            angle_rad = math.atan2(cy, cx)
+            angle_deg = int(math.degrees(angle_rad))
+            if angle_deg < 0: angle_deg += 360
+
+            self.node.pub_person_dist.publish(Int32(data=dist_val))
+            self.node.pub_person_dir.publish(Int32(data=angle_deg))
+
+            info_marker = Marker()
+            info_marker.header = header
+            info_marker.ns = "human_info"
+            info_marker.id = 999
+            info_marker.type = Marker.TEXT_VIEW_FACING
+            info_marker.action = Marker.ADD
+            info_marker.pose.position.x = cx
+            info_marker.pose.position.y = cy
+            info_marker.pose.position.z = cz + 2.0 
+            info_marker.text = f"TARGET ID:{self.locked_human_id}\n{dist_val}m | {angle_deg}°"
+            info_marker.scale.z = 0.5
+            info_marker.color.r, info_marker.color.g, info_marker.color.b, info_marker.color.a = 0.0, 1.0, 0.0, 1.0
+            info_marker.lifetime = rclpy.duration.Duration(seconds=0.2).to_msg()
+            marker_array.markers.append(info_marker)
+            
+            cyl = Marker()
+            cyl.header = header
+            cyl.ns = "human_highlight"
+            cyl.id = 1000
+            cyl.type = Marker.CYLINDER
+            cyl.action = Marker.ADD
+            cyl.pose.position.x = cx
+            cyl.pose.position.y = cy
+            cyl.pose.position.z = cz
+            cyl.scale.x = 0.8
+            cyl.scale.y = 0.8
+            cyl.scale.z = 1.8
+            cyl.color.r, cyl.color.g, cyl.color.b, cyl.color.a = 0.0, 1.0, 0.0, 0.4
+            cyl.lifetime = rclpy.duration.Duration(seconds=0.2).to_msg()
+            marker_array.markers.append(cyl)
+
+        self.node.pub_human_debug.publish(marker_array)
 
 
 def main(args=None):

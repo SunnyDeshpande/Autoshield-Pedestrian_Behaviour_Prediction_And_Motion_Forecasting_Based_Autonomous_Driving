@@ -10,6 +10,7 @@ import numpy as np
 import open3d as o3d
 import sensor_msgs_py.point_cloud2 as pc2
 from std_msgs.msg import Header, Int32
+from std_msgs.msg import Int32MultiArray
 import colorsys
 import math
 
@@ -55,9 +56,7 @@ class LidarObjectDetector(Node):
         self.pub_clustered = self.create_publisher(PointCloud2, '/clustered_points', 10)
         self.pub_markers = self.create_publisher(MarkerArray, '/cluster_markers', 10)
         self.pub_objects = self.create_publisher(DetectedObjectArray, '/detected_objects', 10)
-
-        self.pub_person_dist = self.create_publisher(Int32, '/lidar_person_distance', 10)
-        self.pub_person_dir = self.create_publisher(Int32, '/lidar_person_direction', 10)
+        self.pub_pedestrian_pos = self.create_publisher(Int32MultiArray, '/lidar_pedestrian_position', 10)
         self.pub_human_debug = self.create_publisher(MarkerArray, '/human_debug_info', 10)
 
         self.tracker = SimpleClusterTracker(self)
@@ -315,9 +314,9 @@ class SimpleClusterTracker:
                                  y=float(-track['centroid'][1]), # Negate Y
                                  z=float(track['centroid'][2] + 2.0)) # offset height
             obj.point_count = len(cluster['points'])
-            dx, dy = -track['centroid'][0], -track['centroid'][1]
+            dx, dy = track['centroid'][0], track['centroid'][1]
             obj.distance = math.hypot(dx, dy)
-            obj.angle_deg = math.degrees(math.atan2(dy, dx))
+            obj.angle_deg = math.degrees(math.atan2(-dx, dy))
             arr.objects.append(obj)
         self.node.pub_objects.publish(arr)
 
@@ -407,14 +406,15 @@ class SimpleClusterTracker:
         if selected_track:
             cx, cy = selected_track['centroid'][0], selected_track['centroid'][1]
             cz = selected_track['centroid'][2]
-            dist_val = int(math.hypot(cx, cy))
+            dist_val = int(math.hypot(cx, cy) + 0.5)
             
-            angle_rad = math.atan2(cy, cx)
-            angle_deg = int(math.degrees(angle_rad))
+            angle_rad = math.atan2(-cx, cy)
+            angle_deg = int(math.degrees(angle_rad) + 0.5)
             if angle_deg < 0: angle_deg += 360
 
-            self.node.pub_person_dist.publish(Int32(data=dist_val))
-            self.node.pub_person_dir.publish(Int32(data=angle_deg))
+            pos_msg = Int32MultiArray()
+            pos_msg.data = [dist_val, angle_deg]
+            self.node.pub_pedestrian_pos.publish(pos_msg)
 
             info_marker = Marker()
             info_marker.header = header
@@ -425,7 +425,7 @@ class SimpleClusterTracker:
             info_marker.pose.position.x = cx
             info_marker.pose.position.y = cy
             info_marker.pose.position.z = cz + 2.0 
-            info_marker.text = f"TARGET ID:{self.locked_human_id}\n{dist_val}m | {angle_deg}°"
+            info_marker.text = f"HUMAN ID:{self.locked_human_id}\n{dist_val}m | {angle_deg}°"
             info_marker.scale.z = 0.5
             info_marker.color.r, info_marker.color.g, info_marker.color.b, info_marker.color.a = 0.0, 1.0, 0.0, 1.0
             info_marker.lifetime = rclpy.duration.Duration(seconds=0.2).to_msg()
@@ -446,6 +446,10 @@ class SimpleClusterTracker:
             cyl.color.r, cyl.color.g, cyl.color.b, cyl.color.a = 0.0, 1.0, 0.0, 0.4
             cyl.lifetime = rclpy.duration.Duration(seconds=0.2).to_msg()
             marker_array.markers.append(cyl)
+        # else:
+        #     empty_msg = Int32MultiArray()
+        #     empty_msg.data = [0, 0]
+        #     self.node.pub_pedestrian_pos.publish(empty_msg)
 
         self.node.pub_human_debug.publish(marker_array)
 

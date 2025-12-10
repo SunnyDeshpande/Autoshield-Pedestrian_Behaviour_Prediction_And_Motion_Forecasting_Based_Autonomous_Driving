@@ -15,6 +15,7 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.xml')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'waypoints'), glob('waypoints/*.csv')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -31,6 +32,10 @@ setup(
         'console_scripts': [
             'lidar_processing = autoshield_full.autoshield_lidar_processing:main',
             'straight_path = autoshield_full.autoshield_straight_path:main',
+            'stanley_controller = autoshield_full.autoshield_stanley_controller:main',
+            'safety_controller = autoshield_full.autoshield_safety_controller:main',
+            'lidar_camera_fusion = autoshield_full.autoshield_lidar_camera_fusion:main',
+            'high_level_command = autoshield_full.autoshield_high_level_command:main',
         ],
     },
 )

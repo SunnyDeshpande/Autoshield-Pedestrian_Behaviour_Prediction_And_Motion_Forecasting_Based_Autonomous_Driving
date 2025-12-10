@@ -1,7 +1,7 @@
 autoshield_straight_path:
   ros__parameters:
     # Vehicle configuration
-    vehicle_name: ""                # Vehicle identifier (e.g., "e2", "e4")
+    vehicle_name: ""  #remember to change it to null if error               # Vehicle identifier (e.g., "e2", "e4")
 
     # Control loop parameters
     rate_hz: 20                     # Control loop frequency (Hz)

@@ -72,22 +72,21 @@ class RgbdPedestrianDetector(Node):
         )
         self.bridge = CvBridge()
 
+        # Inputs":
         self.sub_rgb = self.create_subscription(Image, '/oak/rgb/image_raw', self.image_cb, qos)
         self.sub_depth = self.create_subscription(Image, '/oak/stereo/image_raw', self.depth_cb, qos)
 
-        # Keep existing 2D topics
+        # Outputs:
         self.pub_dets = self.create_publisher(Detection2DArray, 'detections', 10)
         self.pub_debug = self.create_publisher(Image, 'detections/image', 10) if self.publish_debug else None
 
-        # New required outputs
         self.pub_rgbd_position = self.create_publisher(
             Int32MultiArray, 'rgbd_pedestrian_position', 10
         )
         self.pub_ped_sign_present = self.create_publisher(
             Bool, 'pedestrian_sign_present', 10
         )
-
-        # Optional: RViz markers for detected 3D people
+        
         self.pub_person_marker = self.create_publisher(Marker, 'person_3d_marker', 10)
 
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -310,7 +309,7 @@ class RgbdPedestrianDetector(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = RgbdPerson3DExtractor()
+    node = RgbdPedestrianDetector()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -6,7 +6,7 @@ from geometry_msgs.msg import Point, Twist, TransformStamped
 from visualization_msgs.msg import Marker
 from std_msgs.msg import Int32MultiArray, Float64
 
-from vehicle_msgs.msg import VehicleRpt  # adjust to your actual package
+from vehicle_msgs.msg import VehicleRpt  
 
 from tf2_ros import TransformBroadcaster
 
@@ -18,16 +18,12 @@ class PedestrianBehaviorPredictor(Node):
         super().__init__('pedestrian_behavior_predictor')
 
         # ---------------- Parameters ----------------
-        # Now use fused distance + direction input
-        self.declare_parameter('prediction_time', 5.0)          # seconds
+        self.declare_parameter('prediction_time', 5.0)  # seconds
         self.declare_parameter('prediction_points', 20)
         self.declare_parameter('collision_distance_threshold', 1.0)  # meters
         self.declare_parameter('max_missing_frames', 10)
         self.declare_parameter('max_path_len', 100)
         self.declare_parameter('smooth_alpha', 0.6)
-
-        ped_topic = self.get_parameter('pedestrian_fusion_topic').get_parameter_value().string_value
-        veh_topic = self.get_parameter('vehicle_rpt_topic').get_parameter_value().string_value
 
         self.prediction_time = float(self.get_parameter('prediction_time').value)
         self.prediction_points = int(self.get_parameter('prediction_points').value)
@@ -36,17 +32,15 @@ class PedestrianBehaviorPredictor(Node):
         self.max_path_len = int(self.get_parameter('max_path_len').value)
         self.smooth_alpha = float(self.get_parameter('smooth_alpha').value)
 
-        # ---------------- ROS I/O ----------------
-        # Input: fused pedestrian distance & direction
+        # Inputs:
         self.sub_ped = self.create_subscription(
             Int32MultiArray, 'fusion_pedestrian_position', self.pedestrian_cb, 10
         )
-        # Vehicle state (speed)
         self.sub_vehicle = self.create_subscription(
             VehicleRpt, 'vehicle_rpt', self.vehicle_cb, 10
         )
 
-        # Outputs: motion + TTC
+        # Outputs:
         self.pub_ped_motion = self.create_publisher(Twist, 'pedestrian_motion', 10)
         self.pub_ped_ttc = self.create_publisher(Float64, 'pedestrian_ttc', 10)
 
@@ -57,7 +51,7 @@ class PedestrianBehaviorPredictor(Node):
         self.pub_car_path_marker = self.create_publisher(Marker, 'car_path', 10)
         self.pub_camera_marker = self.create_publisher(Marker, 'camera_marker', 10)
 
-        # TF broadcaster (same transform as YOLO node)
+        # TF broadcaster
         self.tf_broadcaster = TransformBroadcaster(self)
         self.publish_camera_transform()
 
@@ -71,7 +65,7 @@ class PedestrianBehaviorPredictor(Node):
         self.get_logger().info("Pedestrian TTC Predictor ready (fusion distance+direction input + camera marker).")
 
     # ------------------------------------------------------------------
-    # TF: base_link -> oak_rgb_camera_optical_frame (copied from YOLO node)
+    # TF: base_link -> oak_rgb_camera_optical_frame
     # ------------------------------------------------------------------
     def publish_camera_transform(self):
         t = TransformStamped()

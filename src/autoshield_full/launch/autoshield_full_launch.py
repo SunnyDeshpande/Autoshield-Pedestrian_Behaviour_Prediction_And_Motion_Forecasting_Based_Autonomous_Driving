@@ -92,6 +92,12 @@ def generate_launch_description():
         'sensor_fusion_params.yaml'
     ])
 
+    high_level_config = PathJoinSubstitution([
+        FindPackageShare('autoshield_full'),
+        'config',
+        'high_level_decision_params.yaml'
+    ])
+
     # Lidar preprocessing node
     lidar_node = Node(
         package='lidar_person_detection',
@@ -161,15 +167,18 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_fusion'))
     )
 
-    # High-level command node
+    # High-level decision node
     high_level_node = Node(
         package='autoshield_full',
         executable='high_level_command',
-        name='high_level_command',
+        name='high_level_decision_node',
         output='screen',
-        parameters=[{
-            'vehicle_name': LaunchConfiguration('vehicle_name'),
-        }],
+        parameters=[
+            high_level_config,
+            {
+                'vehicle_name': LaunchConfiguration('vehicle_name'),
+            }
+        ],
         condition=IfCondition(LaunchConfiguration('enable_high_level'))
     )
 

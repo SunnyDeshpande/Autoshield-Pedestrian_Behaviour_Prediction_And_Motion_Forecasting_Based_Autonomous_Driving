@@ -13,7 +13,7 @@ import pygame
 import rclpy
 from rclpy.node import Node
 
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from pacmod2_msgs.msg import PositionWithSpeed, VehicleSpeedRpt, GlobalCmd, SystemCmdFloat, SystemCmdInt
 from sensor_msgs.msg import NavSatFix
 from septentrio_gnss_driver.msg import INSNavGeod
@@ -74,14 +74,22 @@ class OnlineFilter:
     
 class AutoshieldStraightPath(Node):
     def __init__(self):
-        super().__init__('autoshield_straight_path')
-        
+        super().__init__('autoshield_safety_controller')
+
         # Declare parameters
         self.declare_parameter('vehicle_name', "")
         self.declare_parameter('rate_hz', 20)
-        self.declare_parameter('desired_speed', 5.0)  # m/s (default 2 m/s)
+        self.declare_parameter('desired_speed', 5.0)  # m/s (default cruise speed)
         self.declare_parameter('max_acceleration', 1)
-        
+
+        # Safety speed parameters
+        self.declare_parameter('speeds/slow_speed', 2.5)      # SLOW_CAUTION speed
+        self.declare_parameter('speeds/creep_speed', 1.0)     # CREEP_PASS speed
+
+        # Braking parameters
+        self.declare_parameter('braking/hard_brake_effort', 0.6)   # Emergency brake (0.0-1.0)
+        self.declare_parameter('braking/holding_effort', 0.3)      # Holding brake to prevent roll
+
         self.declare_parameter('pid/kp', 0.6)
         self.declare_parameter('pid/ki', 0.0)
         self.declare_parameter('pid/kd', 0.1)
@@ -102,7 +110,15 @@ class AutoshieldStraightPath(Node):
         self.rate_hz = self.get_parameter('rate_hz').value
         self.desired_speed = min(5.0, self.get_parameter('desired_speed').value)  # Cap at 5 m/s
         self.max_accel = min(2.0, self.get_parameter('max_acceleration').value)  # Cap at 2 m/s²
-        
+
+        # Load safety speed parameters
+        self.slow_speed = self.get_parameter('speeds/slow_speed').value
+        self.creep_speed = self.get_parameter('speeds/creep_speed').value
+
+        # Load braking parameters
+        self.hard_brake_effort = self.get_parameter('braking/hard_brake_effort').value
+        self.holding_effort = self.get_parameter('braking/holding_effort').value
+
         # Initialize PID controller for speed
         self.pid_speed = PID(
             kp=self.get_parameter('pid/kp').value,
@@ -110,21 +126,26 @@ class AutoshieldStraightPath(Node):
             kd=self.get_parameter('pid/kd').value,
             wg=self.get_parameter('pid/wg').value
         )
-        
+
         # Initialize speed filter
         self.speed_filter = OnlineFilter(
             cutoff=self.get_parameter('filter/cutoff').value,
             fs=self.get_parameter('filter/fs').value,
             order=self.get_parameter('filter/order').value
         )
-        
+
         # Initialize vehicle state
         self.speed = 0.0
         self.pacmod_enable = False
-        
+
+        # Safety state (default to CRUISE)
+        self.safety_state = "CRUISE"
+        self.last_logged_state = ""
+
         # Subscriptions
         self.create_subscription(Bool, '/pacmod/enabled', self.enable_callback, 10)
         self.create_subscription(VehicleSpeedRpt, '/pacmod/vehicle_speed_rpt', self.speed_callback, 10)
+        self.create_subscription(String, '/safety_decision', self.safety_callback, 10)
 
         # Publishers
         self.global_pub = self.create_publisher(GlobalCmd, '/pacmod/global_cmd', 10)
@@ -144,8 +165,16 @@ class AutoshieldStraightPath(Node):
         
         # Start control loop timer
         self.timer = self.create_timer(1.0 / self.rate_hz, self.control_loop)
-        
-        self.get_logger().info(f"Straight path controller initialized. Desired speed: {self.desired_speed:.2f} m/s")
+
+        self.get_logger().info("=" * 60)
+        self.get_logger().info("Safety Controller Initialized")
+        self.get_logger().info("=" * 60)
+        self.get_logger().info(f"Cruise speed: {self.desired_speed:.2f} m/s")
+        self.get_logger().info(f"Slow speed: {self.slow_speed:.2f} m/s")
+        self.get_logger().info(f"Creep speed: {self.creep_speed:.2f} m/s")
+        self.get_logger().info(f"Hard brake effort: {self.hard_brake_effort:.2f}")
+        self.get_logger().info(f"Holding brake effort: {self.holding_effort:.2f}")
+        self.get_logger().info("=" * 60)
 
     def speed_callback(self, msg):
         """Receive and filter vehicle speed"""
@@ -154,6 +183,13 @@ class AutoshieldStraightPath(Node):
     def enable_callback(self, msg):
         """Monitor PACMod enable status"""
         self.pacmod_enable = msg.data
+
+    def safety_callback(self, msg):
+        """Receive safety decision from high-level decision node"""
+        new_state = msg.data
+        if new_state != self.safety_state:
+            self.get_logger().info(f"Safety state changed: {self.safety_state} -> {new_state}")
+        self.safety_state = new_state
         
     def check_joystick_enable(self):
         """Check joystick buttons for enable/disable commands"""
@@ -208,42 +244,101 @@ class AutoshieldStraightPath(Node):
             
             self.get_logger().warn('Vehicle disabled')
         
-        # Execute straight path controller
+        # Execute safety controller
         elif joy_enable != 0 and self.pacmod_enable:
             # Keep steering straight
             self.steer_cmd.angular_position = 0.0
             self.steer_pub.publish(self.steer_cmd)
-            
-            # PID speed control
-            now = self.get_clock().now().nanoseconds * 1e-9
-            speed_error = self.desired_speed - self.speed
-            
-            # Dead zone to prevent oscillation
-            if abs(speed_error) < 0.05:
-                speed_error = 0.0
-                
-            throttle_cmd = self.pid_speed.get_control(now, speed_error)
-            throttle_cmd = max(0.0, min(throttle_cmd, self.max_accel))
 
-            # Publish acceleration command
+            # ========== STATE MACHINE: Determine Target Speed ==========
+            # Based on safety_state, set the target speed
+            if self.safety_state == "CRUISE":
+                target_speed = self.desired_speed
+            elif self.safety_state == "SLOW_CAUTION":
+                target_speed = self.slow_speed
+            elif self.safety_state == "CREEP_PASS":
+                target_speed = self.creep_speed
+            elif self.safety_state == "STOP_WATCH":
+                target_speed = 0.0
+            elif self.safety_state == "STOP_YIELD":
+                target_speed = 0.0  # Will handle emergency braking below
+            else:
+                # Unknown state - default to CRUISE
+                self.get_logger().warn(f"Unknown safety state: {self.safety_state}, defaulting to CRUISE")
+                target_speed = self.desired_speed
+
+            # ========== EMERGENCY MODE: STOP_YIELD ==========
+            if self.safety_state == "STOP_YIELD":
+                # EMERGENCY! Bypass PID, apply hard brake immediately
+                throttle_cmd = 0.0
+                brake_cmd = self.hard_brake_effort
+
+                # Log emergency state (only once per state change)
+                if self.safety_state != self.last_logged_state:
+                    self.get_logger().error(
+                        f"🚨 EMERGENCY STOP! State: {self.safety_state} | "
+                        f"Applying hard brake: {brake_cmd:.2f}"
+                    )
+                    self.last_logged_state = self.safety_state
+
+            # ========== NORMAL CONTROL: All Other States ==========
+            else:
+                # Calculate speed error
+                now = self.get_clock().now().nanoseconds * 1e-9
+                speed_error = target_speed - self.speed
+
+                # Dead zone to prevent oscillation
+                if abs(speed_error) < 0.05:
+                    speed_error = 0.0
+
+                # Get PID output
+                pid_output = self.pid_speed.get_control(now, speed_error)
+
+                # ========== ACTUATION LOGIC ==========
+                if pid_output > 0:
+                    # Need to accelerate
+                    throttle_cmd = max(0.0, min(pid_output, self.max_accel))
+                    brake_cmd = 0.0
+
+                elif pid_output < 0:
+                    # Need to brake
+                    throttle_cmd = 0.0
+                    brake_cmd = min(abs(pid_output), 1.0)  # Clamp brake to 1.0
+
+                else:
+                    # PID output is zero (at target)
+                    throttle_cmd = 0.0
+                    brake_cmd = 0.0
+
+                # ========== HOLDING LOGIC ==========
+                # If target is stopped and vehicle is nearly stopped, apply holding brake
+                if target_speed == 0.0 and self.speed < 0.1:
+                    brake_cmd = self.holding_effort
+                    throttle_cmd = 0.0
+
+                # Log state change or periodic info
+                if self.safety_state != self.last_logged_state:
+                    self.get_logger().info(
+                        f"State: {self.safety_state} | Target: {target_speed:.2f} m/s | "
+                        f"Current: {self.speed:.2f} m/s"
+                    )
+                    self.last_logged_state = self.safety_state
+                else:
+                    # Periodic debug logging
+                    self.get_logger().debug(
+                        f"State: {self.safety_state} | Speed: {self.speed:.2f}/{target_speed:.2f} m/s | "
+                        f"Throttle: {throttle_cmd:.2f} | Brake: {brake_cmd:.2f}"
+                    )
+
+            # ========== PUBLISH COMMANDS ==========
             self.accel_cmd.command = throttle_cmd
-            self.brake_cmd.command = 0.0
+            self.brake_cmd.command = brake_cmd
             self.accel_pub.publish(self.accel_cmd)
             self.brake_pub.publish(self.brake_cmd)
 
             # Keep global command enabled
             self.global_cmd.enable = True
             self.global_pub.publish(self.global_cmd)
-            
-            
-            self.get_logger().info(
-                f"Straight Path - "
-                f"Speed: {self.speed:.2f} m/s, "
-                f"Target: {self.desired_speed:.2f} m/s, "
-                f"Error: {speed_error:.2f} m/s, "
-                f"Throttle: {throttle_cmd:.2f} m/s², "
-                f"Steering: 0.00°"
-            )
 
 
 def main(args=None):

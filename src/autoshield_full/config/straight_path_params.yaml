@@ -1,14 +1,24 @@
-autoshield_straight_path:
+autoshield_safety_controller:
   ros__parameters:
     # Vehicle configuration
-    vehicle_name: ""  #remember to change it to null if error               # Vehicle identifier (e.g., "e2", "e4")
+    vehicle_name: ""                # Vehicle identifier (e.g., "e2", "e4")
 
     # Control loop parameters
     rate_hz: 20                     # Control loop frequency (Hz)
 
     # Speed control parameters
-    desired_speed: 2.0              # Target speed in m/s (max: 5.0 m/s)
+    desired_speed: 2.0              # CRUISE mode speed in m/s (max: 5.0 m/s)
     max_acceleration: 1.0           # Maximum acceleration in m/s² (max: 2.0 m/s²)
+
+    # Safety speed parameters (for different states)
+    speeds:
+      slow_speed: 2.5               # SLOW_CAUTION mode speed (m/s)
+      creep_speed: 1.0              # CREEP_PASS mode speed (m/s)
+
+    # Braking parameters
+    braking:
+      hard_brake_effort: 0.6        # STOP_YIELD emergency brake (0.0-1.0)
+      holding_effort: 0.3           # Holding brake to prevent roll (0.0-1.0)
 
     # PID controller parameters for speed control
     pid:

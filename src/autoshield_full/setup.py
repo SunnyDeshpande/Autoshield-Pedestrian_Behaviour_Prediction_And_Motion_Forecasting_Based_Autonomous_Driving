@@ -37,6 +37,7 @@ setup(
             'lidar_camera_fusion = autoshield_full.autoshield_lidar_camera_fusion:main',
             'high_level_command = autoshield_full.autoshield_high_level_command:main',
             'camera_position_spoof = autoshield_full.autoshield_camera_position:main',
+            'pedestrian_aware_path = autoshield_full.autoshield_pedestrian_aware_path:main',
         ],
     },
 )

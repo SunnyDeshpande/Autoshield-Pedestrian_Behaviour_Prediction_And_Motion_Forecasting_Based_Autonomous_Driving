@@ -7,7 +7,7 @@ autoshield_safety_controller:
     rate_hz: 20                     # Control loop frequency (Hz)
 
     # Speed control parameters
-    desired_speed: 2.0              # CRUISE mode speed in m/s (max: 5.0 m/s)
+    desired_speed: 5.0              # CRUISE mode speed in m/s (max: 5.0 m/s)
     max_acceleration: 1.0           # Maximum acceleration in m/s² (max: 2.0 m/s²)
 
     # Safety speed parameters (for different states)
@@ -17,8 +17,8 @@ autoshield_safety_controller:
 
     # Braking parameters
     braking:
-      hard_brake_effort: 0.6        # STOP_YIELD emergency brake (0.0-1.0)
-      holding_effort: 0.3           # Holding brake to prevent roll (0.0-1.0)
+      hard_brake_effort: 0.1       # STOP_YIELD emergency brake (0.0-1.0)
+      holding_effort: 0.0           # Holding brake to prevent roll (0.0-1.0)
 
     # PID controller parameters for speed control
     pid:

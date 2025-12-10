@@ -41,7 +41,8 @@ class SensorFusionNode(Node):
         self.ts = message_filters.ApproximateTimeSynchronizer(
             [self.lidar_sub, self.camera_sub],
             queue_size=queue_size,
-            slop=slop
+            slop=slop,
+            allow_headerless=True
         )
         self.ts.registerCallback(self.fusion_callback)
 

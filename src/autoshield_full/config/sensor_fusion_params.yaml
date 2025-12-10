@@ -1,22 +1,10 @@
 sensor_fusion_node:
   ros__parameters:
-    # Data Association Parameters
-    matching_threshold: 2.0         # Maximum distance (meters) between Lidar and Camera
-                                    # detections to consider them the same person
-
-    # Fusion Weights - Distance
-    # Trust Lidar more for distance (Lidar is more accurate)
-    lidar_distance_weight: 0.8      # Weight for Lidar distance (0.0-1.0)
-    camera_distance_weight: 0.2     # Weight for Camera distance (0.0-1.0)
-                                    # Note: Sum should equal 1.0
-
-    # Fusion Weights - Direction
-    # Trust Camera more for direction (better angular resolution)
-    lidar_direction_weight: 0.3     # Weight for Lidar direction (0.0-1.0)
-    camera_direction_weight: 0.7    # Weight for Camera direction (0.0-1.0)
-                                    # Note: Sum should equal 1.0
-
-    # Time Synchronization Parameters
-    sync_queue_size: 10             # Number of messages to buffer for synchronization
-    sync_slop: 0.1                  # Maximum time difference (seconds) for message sync
-                                    # Increase if sensors have timing jitter
+    matching_threshold: 2.0                                     
+    lidar_distance_weight: 0.8      
+    camera_distance_weight: 0.2                  
+    lidar_direction_weight: 0.3     
+    camera_direction_weight: 0.7    #according to chatgpt             
+    sync_queue_size: 10             
+    sync_slop: 0.1                  
+                                    

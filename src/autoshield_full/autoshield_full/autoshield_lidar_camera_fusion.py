@@ -8,22 +8,6 @@ import math
 
 
 class SensorFusionNode(Node):
-    """
-    Central brain for fusing Lidar and Camera pedestrian detections.
-
-    Subscribes to:
-        - /lidar_pedestrian_position (Int32MultiArray)
-        - /rgbd_pedestrian_position (Int32MultiArray)
-
-    Publishes to:
-        - /fusion_pedestrian_position (Int32MultiArray)
-
-    Data Format: [distance1, direction1, distance2, direction2, ...]
-        - distance: Integer in meters
-        - direction: Integer in degrees (0-360)
-    """
-    
-    
     def __init__(self):
         super().__init__('sensor_fusion_node')
 
@@ -292,9 +276,7 @@ class SensorFusionNode(Node):
 
 
 def main(args=None):
-    """
-    Main entry point for the sensor fusion node.
-    """
+
     rclpy.init(args=args)
 
     try:

@@ -1,0 +1,24 @@
+autoshield_straight_path:
+  ros__parameters:
+    # Vehicle configuration
+    vehicle_name: ""                # Vehicle identifier (e.g., "e2", "e4")
+
+    # Control loop parameters
+    rate_hz: 20                     # Control loop frequency (Hz)
+
+    # Speed control parameters
+    desired_speed: 2.0              # Target speed in m/s (max: 5.0 m/s)
+    max_acceleration: 1.0           # Maximum acceleration in m/s² (max: 2.0 m/s²)
+
+    # PID controller parameters for speed control
+    pid:
+      kp: 0.6                       # Proportional gain
+      ki: 0.0                       # Integral gain
+      kd: 0.1                       # Derivative gain
+      wg: 10.0                      # Integral windup guard
+
+    # Butterworth filter parameters for speed smoothing
+    filter:
+      cutoff: 1.2                   # Cutoff frequency (Hz)
+      fs: 30.0                      # Sampling frequency (Hz)
+      order: 4                      # Filter order

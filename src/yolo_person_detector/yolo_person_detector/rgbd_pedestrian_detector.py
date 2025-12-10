@@ -37,8 +37,10 @@ class RgbdPedestrianDetector(Node):
         self.declare_parameter('imgsz', 640)
         self.declare_parameter('half', False)
         self.declare_parameter('max_detections', 100)
+        self.declare_parameter('image_topic', '/oak/rgb/image_raw')
+        self.declare_parameter('depth_topic', '/oak/stereo/image_raw')
 
-        image_topic = self.get_parameter('image_topic').get_parameter_value().string_value
+        self.image_topic = self.get_parameter('image_topic').get_parameter_value().string_value
         self.depth_topic = self.get_parameter('depth_topic').get_parameter_value().string_value
         self.publish_debug = self.get_parameter('publish_debug_image').get_parameter_value().bool_value
         model_path = self.get_parameter('model_path').get_parameter_value().string_value
@@ -73,8 +75,8 @@ class RgbdPedestrianDetector(Node):
         self.bridge = CvBridge()
 
         # Inputs":
-        self.sub_rgb = self.create_subscription(Image, '/oak/rgb/image_raw', self.image_cb, qos)
-        self.sub_depth = self.create_subscription(Image, '/oak/stereo/image_raw', self.depth_cb, qos)
+        self.sub_rgb = self.create_subscription(Image, self.image_topic, self.image_cb, qos)
+        self.sub_depth = self.create_subscription(Image, self.depth_topic, self.depth_cb, qos)
 
         # Outputs:
         self.pub_dets = self.create_publisher(Detection2DArray, 'detections', 10)

@@ -15,9 +15,9 @@ def generate_launch_description():
                 # Cropping parameters
                 'crop_min_x': -15.0,
                 'crop_max_x': 0.0,
-                'crop_min_y': -2.0,
-                'crop_max_y': 2.0,
-                'crop_min_z': -2.0,
+                'crop_min_y': -3.0,
+                'crop_max_y': 3.0,
+                'crop_min_z': -2.1,
                 'crop_max_z': 1.0,
                 
                 # Preprocessing parameters

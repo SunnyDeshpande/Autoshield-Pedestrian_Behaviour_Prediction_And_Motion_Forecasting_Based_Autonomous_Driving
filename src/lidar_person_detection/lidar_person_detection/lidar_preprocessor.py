@@ -425,7 +425,7 @@ class SimpleClusterTracker:
             info_marker.pose.position.x = cx
             info_marker.pose.position.y = cy
             info_marker.pose.position.z = cz + 2.0 
-            info_marker.text = f"HUMAN ID:{self.locked_human_id}\n{dist_val}m | {angle_deg}°"
+            info_marker.text = f"HUMAN ID:{self.locked_human_id}\n{dist_val}m | {angle_deg}deg"
             info_marker.scale.z = 0.5
             info_marker.color.r, info_marker.color.g, info_marker.color.b, info_marker.color.a = 0.0, 1.0, 0.0, 1.0
             info_marker.lifetime = rclpy.duration.Duration(seconds=0.2).to_msg()

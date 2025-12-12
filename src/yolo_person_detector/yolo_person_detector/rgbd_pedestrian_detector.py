@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ------- Imports -------
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -21,15 +22,15 @@ try:
 except Exception:
     YOLO = None
 
+# COCO class ID for 'person'
 COCO_PERSON_CLASS_ID = 0
-
 
 class RgbdPedestrianDetector(Node):
     def __init__(self):
         super().__init__('rgbd_pedestrian_detector')
 
-        # ---------------- Parameters ----------------
-        self.declare_parameter('publish_debug_image', True)
+        # ------- Parameters -------
+        self.declare_parameteCOCO_PERSON_CLASS_IDr('publish_debug_image', True)
         self.declare_parameter('model_path', 'yolo11n.pt')
         self.declare_parameter('conf', 0.35)
         self.declare_parameter('iou', 0.45)
@@ -37,12 +38,15 @@ class RgbdPedestrianDetector(Node):
         self.declare_parameter('imgsz', 640)
         self.declare_parameter('half', False)
         self.declare_parameter('max_detections', 100)
+        self.declare_parameter('image_topic', '/oak/rgb/image_raw')
+        self.declare_parameter('depth_topic', '/oak/stereo/image_raw')
 
-        image_topic = self.get_parameter('image_topic').get_parameter_value().string_value
+        self.publish_debug = self.get_parameter('publish_debug_image').get_parameter_value().bool_value
+        self.model_path = self.get_parameter('model_path').get_parameter_value().string_value
+
+        self.image_topic = self.get_parameter('image_topic').get_parameter_value().string_value
         self.depth_topic = self.get_parameter('depth_topic').get_parameter_value().string_value
         self.publish_debug = self.get_parameter('publish_debug_image').get_parameter_value().bool_value
-        model_path = self.get_parameter('model_path').get_parameter_value().string_value
-
         self.conf = float(self.get_parameter('conf').value)
         self.iou = float(self.get_parameter('iou').value)
         self.device = self.get_parameter('device').get_parameter_value().string_value
@@ -50,12 +54,12 @@ class RgbdPedestrianDetector(Node):
         self.half = bool(self.get_parameter('half').value)
         self.max_det = int(self.get_parameter('max_detections').value)
 
-        # ---------------- YOLO model ----------------
+        # ------- YOLO model -------
         if YOLO is None:
             raise RuntimeError("Ultralytics is not installed. `pip install ultralytics`")
 
-        self.get_logger().info(f"Loading YOLOv11 model: {model_path}")
-        self.model = YOLO(model_path)
+        self.get_logger().info(f"Loading YOLOv11 model: {self.model_path}")
+        self.model = YOLO(self.model_path)
         self.model.overrides['conf'] = self.conf
         self.model.overrides['iou'] = self.iou
         self.model.overrides['device'] = self.device
@@ -64,7 +68,7 @@ class RgbdPedestrianDetector(Node):
         self.model.overrides['max_det'] = self.max_det
         self.model.overrides['classes'] = [COCO_PERSON_CLASS_ID]
 
-        # ---------------- ROS I/O ----------------
+        # ------- ROS I/O -------
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
@@ -72,11 +76,11 @@ class RgbdPedestrianDetector(Node):
         )
         self.bridge = CvBridge()
 
-        # Inputs":
-        self.sub_rgb = self.create_subscription(Image, '/oak/rgb/image_raw', self.image_cb, qos)
-        self.sub_depth = self.create_subscription(Image, '/oak/stereo/image_raw', self.depth_cb, qos)
+        # ------- Inputs -------
+        self.sub_rgb = self.create_subscription(Image, self.image_topic, self.image_cb, qos)
+        self.sub_depth = self.create_subscription(Image, self.depth_topic, self.depth_cb, qos)
 
-        # Outputs:
+        # ------- Outputs -------
         self.pub_dets = self.create_publisher(Detection2DArray, 'detections', 10)
         self.pub_debug = self.create_publisher(Image, 'detections/image', 10) if self.publish_debug else None
 
@@ -99,9 +103,7 @@ class RgbdPedestrianDetector(Node):
 
         self.get_logger().info("RGB-D Person 3D Extractor ready (distance+direction+presence).")
 
-    # ------------------------------------------------------------------
-    # TF
-    # ------------------------------------------------------------------
+    # ------- TF -------
     def publish_camera_transform(self):
         t = TransformStamped()
         t.header.stamp = self.get_clock().now().to_msg()
@@ -116,9 +118,7 @@ class RgbdPedestrianDetector(Node):
         t.transform.rotation.w = 0.7071054825112363
         self.tf_broadcaster.sendTransform(t)
 
-    # ------------------------------------------------------------------
-    # Depth callback
-    # ------------------------------------------------------------------
+    # ------- Depth image callback -------
     def depth_cb(self, msg: Image):
         try:
             depth_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
@@ -126,9 +126,7 @@ class RgbdPedestrianDetector(Node):
         except Exception as e:
             self.get_logger().warn(f"Depth conversion failed: {e}")
 
-    # ------------------------------------------------------------------
-    # Main image callback
-    # ------------------------------------------------------------------
+    # ------- RGB image callback -------
     def image_cb(self, msg: Image):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -152,7 +150,7 @@ class RgbdPedestrianDetector(Node):
         det_msg = Detection2DArray()
         det_msg.header = msg.header
 
-        # Tracking best (closest) pedestrian
+        # Tracking closest pedestrian
         best_dist = float('inf')
         best_angle_deg = 0.0
         found_valid_ped = False
@@ -175,7 +173,7 @@ class RgbdPedestrianDetector(Node):
                 bw = (x2 - x1)
                 bh = (y2 - y1)
 
-                # 2D detection message (optional, for debug / visualization)
+                # 2D detection message for visualization
                 det = Detection2D()
                 det.header = msg.header
                 det.bbox = BoundingBox2D()
@@ -197,7 +195,7 @@ class RgbdPedestrianDetector(Node):
                     yi = int(np.clip(cy, 0, self.latest_depth.shape[0] - 1))
                     z = float(self.latest_depth[yi, xi])
                 if z <= 0.0:
-                    # no valid depth, skip for 3D / distance
+                    # skip if no depth
                     continue
 
                 # Camera optical frame (x right, y down, z forward)
@@ -206,8 +204,7 @@ class RgbdPedestrianDetector(Node):
                 Z_optical = z
 
                 # Approximate transform to base_link:
-                # X_base ~ vertical, Y_base ~ lateral, Z_base ~ forward
-                X_base = Y_optical
+                X_base = Y_optical 
                 Y_base = -X_optical
                 Z_base = Z_optical
 
@@ -215,20 +212,20 @@ class RgbdPedestrianDetector(Node):
                 dist = float(np.sqrt(Y_base**2 + Z_base**2))
 
                 # Direction:
-                # 0° axis = right side of vehicle (negative Y),
+                # 0° axis = right side of vehicle (-ve Y axis of ego frame),
                 # CCW positive: 0° right, 90° front, 180° left, 270° back.
                 angle_rad = np.arctan2(Z_base, -Y_base)
                 angle_deg = float(np.degrees(angle_rad))
                 if angle_deg < 0.0:
                     angle_deg += 360.0
 
-                # Update best (closest) pedestrian
+                # Update closest pedestrian
                 if dist < best_dist:
                     best_dist = dist
                     best_angle_deg = angle_deg
                     found_valid_ped = True
 
-                # Debug drawing
+                # Debug info on image
                 if debug_img is not None:
                     p1 = (int(x1), int(y1))
                     p2 = (int(x2), int(y2))
@@ -282,7 +279,7 @@ class RgbdPedestrianDetector(Node):
             out_msg.header = msg.header
             self.pub_debug.publish(out_msg)
 
-        # Publish presence + (distance, direction) if available
+        # Publish presence + (distance, direction)
         sign_msg = Bool()
         if found_valid_ped:
             sign_msg.data = True
@@ -294,7 +291,6 @@ class RgbdPedestrianDetector(Node):
             self.pub_rgbd_position.publish(pos_msg)
         else:
             sign_msg.data = False
-            # No position published when no pedestrian
 
         self.pub_ped_sign_present.publish(sign_msg)
 
@@ -306,7 +302,7 @@ class RgbdPedestrianDetector(Node):
             self.last_fps_t = now_t
             self.get_logger().info(f"~{fps:.1f} FPS")
 
-
+# ------- Main -------
 def main(args=None):
     rclpy.init(args=args)
     node = RgbdPedestrianDetector()

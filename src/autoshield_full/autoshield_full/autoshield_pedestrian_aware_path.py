@@ -68,21 +68,18 @@ class PedestrianAwarePath(Node):
     def __init__(self):
         super().__init__('pedestrian_aware_path')
 
-        # Declare parameters
         self.declare_parameter('vehicle_name', "")
         self.declare_parameter('rate_hz', 20)
-        self.declare_parameter('desired_speed', 5.0)  # m/s (default cruise speed)
+        self.declare_parameter('desired_speed', 5.0)
         self.declare_parameter('max_acceleration', 1)
 
-        # Pedestrian detection parameters
-        self.declare_parameter('pedestrian/min_danger_angle', 45)      # degrees
-        self.declare_parameter('pedestrian/max_danger_angle', 85)      # degrees
-        self.declare_parameter('pedestrian/max_danger_distance', 10)   # meters
-        self.declare_parameter('pedestrian/timeout', 1.0)              # seconds without message before assuming clear
+        self.declare_parameter('pedestrian/min_danger_angle', 45)
+        self.declare_parameter('pedestrian/max_danger_angle', 85)
+        self.declare_parameter('pedestrian/max_danger_distance', 10)
+        self.declare_parameter('pedestrian/timeout', 1.0)
 
-        # Braking parameters
-        self.declare_parameter('braking/hard_brake_effort', 0.6)   # Emergency brake (0.0-1.0)
-        self.declare_parameter('braking/holding_effort', 0.3)      # Holding brake to prevent roll
+        self.declare_parameter('braking/hard_brake_effort', 0.6)
+        self.declare_parameter('braking/holding_effort', 0.3)
 
         self.declare_parameter('pid/kp', 0.6)
         self.declare_parameter('pid/ki', 0.0)
@@ -92,8 +89,6 @@ class PedestrianAwarePath(Node):
         self.declare_parameter('filter/cutoff', 1.2)
         self.declare_parameter('filter/fs', 30)
         self.declare_parameter('filter/order', 4)
-
-        # Get vehicle name parameter
         vehicle_name = self.get_parameter('vehicle_name').value
         if vehicle_name == "":
             self.get_logger().warn("No vehicle_name parameter found. Using default parameters.")

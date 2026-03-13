@@ -19,7 +19,11 @@
 ## Team
 
 **Team AutoShield** — M.S. Autonomy and Robotics, UIUC
-- Sunny Deshpande · Het Patel · Keisuke Ogawa · Ansh Bhansali
+
+| | |
+|---|---|
+| [Sunny Deshpande](https://github.com/SunnyDeshpande) | [Het Patel](https://github.com/het915) |
+| [Keisuke Ogawa](https://github.com/keeesuke) | [Ansh Bhansali](https://github.com/ansh1113) |
 
 ---
 

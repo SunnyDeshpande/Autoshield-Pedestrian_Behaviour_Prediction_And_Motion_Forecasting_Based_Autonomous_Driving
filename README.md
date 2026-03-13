@@ -16,17 +16,6 @@
 
 ---
 
-## Team
-
-**Team AutoShield** — M.S. Autonomy and Robotics, UIUC
-
-| | |
-|---|---|
-| [Sunny Deshpande](https://github.com/SunnyDeshpande) | [Het Patel](https://github.com/het915) |
-| [Keisuke Ogawa](https://github.com/keeesuke) | [Ansh Bhansali](https://github.com/ansh1113) |
-
----
-
 ## Overview
 
 Reactive pedestrian handling that relies on proximity thresholds and late braking is brittle under uncertainty, latency, and partial observability. AutoShield addresses this by adapting vehicle control **online using behavior cues and TTC risk**, rather than distance thresholds alone.
@@ -277,10 +266,12 @@ ECE 484 course staff and the UIUC GEM platform maintainers for vehicle infrastru
 
 ---
 
-## Author
+## Authors
 
-**Sunny Deshpande** — MEng Autonomy & Robotics, UIUC  
+**Sunny Deshpande** — MEng Autonomy & Robotics, UIUC
 [sunnynd2@illinois.edu](mailto:sunnynd2@illinois.edu) · [sunnydeshpande.com](https://sunnydeshpande.com)
+
+Het Patel · Keisuke Ogawa · Ansh Bhansali
 
 ---
 
